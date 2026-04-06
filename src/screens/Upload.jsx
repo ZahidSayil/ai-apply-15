@@ -22,7 +22,7 @@ export default function Upload() {
       localStorage.setItem('resumeText', res.data.resumeText)
       localStorage.setItem('resumeFileName', file.name)
       navigate('/job')
-    } catch (err) {
+    } catch {
       alert('Failed to parse PDF. Try again.')
       setLoading(false)
     }
@@ -30,47 +30,140 @@ export default function Upload() {
 
   return (
     <div style={styles.page}>
-      <div style={styles.card}>
-        <div style={styles.logo}>apply<span style={styles.logoAccent}>ai</span></div>
-        <h1 style={styles.title}>Land your dream job faster</h1>
-        <p style={styles.sub}>Upload your resume once. We'll tailor it to every job.</p>
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <h1 style={styles.title}>Land your dream job</h1>
+          <p style={styles.subtitle}>Upload your resume to get started</p>
+        </div>
 
         <div
-          style={{ ...styles.dropzone, ...(dragging ? styles.dropzoneActive : {}) }}
+          style={{ ...styles.uploadArea, ...(dragging ? styles.uploadAreaActive : {}) }}
           onDragOver={e => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
           onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
           onClick={() => document.getElementById('fileInput').click()}
         >
-          <div style={styles.uploadIcon}>📄</div>
-          {loading
-            ? <p style={styles.dropText}>Parsing <b>{fileName}</b>...</p>
-            : <><p style={styles.dropText}>Drop your resume here</p>
-               <p style={styles.dropSub}>or tap to browse · PDF only</p></>
-          }
+          <input
+            id="fileInput"
+            type="file"
+            accept=".pdf"
+            onChange={e => handleFile(e.target.files[0])}
+            style={{ display: 'none' }}
+          />
+          {loading ? (
+            <div>
+              <p style={styles.loadingText}>Parsing {fileName}...</p>
+              <div style={styles.spinner} />
+            </div>
+          ) : (
+            <div style={styles.uploadContent}>
+              <p style={styles.uploadIcon}>📄</p>
+              <p style={styles.uploadText}>Drop your resume here</p>
+              <p style={styles.uploadSubtext}>or click to browse (PDF only)</p>
+            </div>
+          )}
         </div>
 
-        <input id="fileInput" type="file" accept=".pdf"
-          style={{ display: 'none' }}
-          onChange={e => handleFile(e.target.files[0])} />
-
-        <p style={styles.hint}>Your resume stays on your device. Never stored.</p>
+        <p style={styles.privacy}>Your resume stays private. Never stored on our servers.</p>
       </div>
     </div>
   )
 }
 
 const styles = {
-  page: { minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' },
-  card: { width: '100%', maxWidth: '400px', textAlign: 'center' },
-  logo: { fontFamily: 'system-ui', fontSize: '28px', fontWeight: '700', color: '#fff', marginBottom: '24px', letterSpacing: '-1px' },
-  logoAccent: { color: '#7c6af7' },
-  title: { fontSize: '24px', fontWeight: '700', color: '#fff', marginBottom: '8px', lineHeight: 1.2 },
-  sub: { fontSize: '14px', color: '#888', marginBottom: '32px' },
-  dropzone: { border: '2px dashed #2a2a45', borderRadius: '16px', padding: '40px 20px', cursor: 'pointer', transition: 'border-color 0.2s', marginBottom: '16px', background: '#0f0f1a' },
-  dropzoneActive: { borderColor: '#7c6af7', background: '#1a1a2e' },
-  uploadIcon: { fontSize: '40px', marginBottom: '12px' },
-  dropText: { fontSize: '15px', color: '#fff', fontWeight: '500', marginBottom: '4px' },
-  dropSub: { fontSize: '13px', color: '#555' },
-  hint: { fontSize: '12px', color: '#444', marginTop: '8px' }
+  page: { 
+    minHeight: '100vh', 
+    background: '#fff',
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    padding: '20px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+  },
+  container: { 
+    width: '100%', 
+    maxWidth: '500px'
+  },
+  header: { 
+    marginBottom: '40px', 
+    textAlign: 'center'
+  },
+  title: { 
+    fontSize: '32px', 
+    fontWeight: '700', 
+    color: '#1a1a1a', 
+    margin: '0 0 12px 0',
+    lineHeight: '1.2'
+  },
+  subtitle: { 
+    fontSize: '16px', 
+    color: '#666', 
+    margin: '0'
+  },
+  uploadArea: { 
+    border: '2px dashed #e0e0e0', 
+    borderRadius: '12px', 
+    padding: '60px 20px', 
+    cursor: 'pointer', 
+    transition: 'all 0.3s ease',
+    marginBottom: '24px', 
+    background: '#f9f9f9',
+    textAlign: 'center'
+  },
+  uploadAreaActive: { 
+    borderColor: '#3b82f6', 
+    background: '#eff6ff',
+    borderWidth: '2px'
+  },
+  uploadContent: { 
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  uploadIcon: { 
+    fontSize: '48px', 
+    margin: '0'
+  },
+  uploadText: { 
+    fontSize: '16px', 
+    fontWeight: '600', 
+    color: '#1a1a1a',
+    margin: '0'
+  },
+  uploadSubtext: { 
+    fontSize: '14px', 
+    color: '#999',
+    margin: '0'
+  },
+  loadingText: {
+    fontSize: '16px',
+    color: '#666',
+    margin: '0 0 16px 0',
+    fontWeight: '500'
+  },
+  spinner: {
+    width: '40px',
+    height: '40px',
+    border: '3px solid #f0f0f0',
+    borderTop: '3px solid #3b82f6',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+    margin: '0 auto'
+  },
+  privacy: { 
+    fontSize: '13px', 
+    color: '#999',
+    margin: '0',
+    textAlign: 'center'
+  }
 }
+
+// Add spin animation
+const styleSheet = document.createElement('style')
+styleSheet.textContent = `
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+`
+document.head.appendChild(styleSheet)

@@ -1,9 +1,17 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
-const multer = require('multer');
-const pdfParse = require('pdf-parse');
+import dotenv from 'dotenv';
+import express from 'express';
+import cors from 'cors';
+import axios from 'axios';
+import multer from 'multer';
+import pdfParse from 'pdf-parse';
+import process from 'process';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+dotenv.config({ path: `${__dirname}/.env` });
 
 // ✅ Verify API Keys are loaded
 console.log('🔑 API Keys loaded:');
@@ -118,7 +126,7 @@ app.post('/scrape', async (req, res) => {
       message: 'This job site blocks scrapers. Please paste the job description instead.'
     });
 
-  } catch (err) {
+  } catch {
     return res.json({
       jobText: null,
       source: 'blocked',
@@ -130,10 +138,23 @@ app.post('/scrape', async (req, res) => {
 app.post('/upload-resume', upload.single('resume'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
+    console.log('📄 Parsing PDF file:', req.file.originalname, `(${req.file.size} bytes)`);
     const data = await pdfParse(req.file.buffer);
+    
+    if (!data.text || data.text.trim().length === 0) {
+      console.warn('⚠️ PDF has no extractable text');
+      return res.status(400).json({ error: 'PDF has no readable text. Please upload a different file.' });
+    }
+    
+    console.log('✅ PDF parsed successfully, extracted', data.text.length, 'characters');
     res.json({ resumeText: data.text.slice(0, 5000) });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to parse PDF', detail: err.message });
+    console.error('❌ PDF parsing error:', err.message);
+    res.status(500).json({ 
+      error: 'Failed to parse PDF', 
+      detail: err.message,
+      hint: 'Make sure your PDF contains text (not just images). Try converting it or uploading a different resume.'
+    });
   }
 });
 
@@ -144,74 +165,103 @@ app.post('/analyze', async (req, res) => {
     return res.status(400).json({ error: 'resumeText and jobText required' });
 
   // Trim inputs to avoid token overflow
-  const trimmedResume = resumeText.slice(0, 2000);
+  const trimmedResume = resumeText.slice(0, 3000);
   const trimmedJob = jobText.slice(0, 2000);
 
-  const prompt = `
-You are an expert career coach and resume writer.
+  const prompt = `You are an expert professional resume writer. Your task is to tailor a resume for a specific job.
 
-RESUME:
+ORIGINAL RESUME:
 ${trimmedResume}
 
-JOB DESCRIPTION:
+TARGET JOB DESCRIPTION:
 ${trimmedJob}
 
-CRITICAL: Return ONLY a valid JSON object. No markdown, no backticks, no explanation.
-Keep ALL string values SHORT — maximum 300 characters each.
-The tailoredResume must be maximum 500 characters.
-The coverLetter must be maximum 500 characters.
+TASK: Create a professionally tailored version that highlights relevant skills and achievements.
 
+CRITICAL REQUIREMENTS:
+1. Return ONLY valid JSON - no markdown, backticks, or extra text
+2. matchScore: 0-100 integer rating how well resume matches the job
+3. matchLabel: "Excellent Match", "Strong Match", "Good Match", or "Fair Match"
+4. matchReason: 1 sentence explaining the match
+5. tailoredResume: Complete professional resume (800-1000 chars) with name, summary, and key sections rewritten to match job requirements. Make it ready-to-use.
+6. changes: Array of 3-5 specific changes made to tailor the resume
+7. coverLetter: Professional cover letter (400-600 chars) ready to send
+8. resumeTips: Array of 3-5 actionable tips for this specific role
+
+Return EXACTLY this JSON structure:
 {
   "matchScore": 82,
   "matchLabel": "Strong Match",
-  "matchReason": "One sentence max.",
-  "tailoredResume": "Shortened tailored resume under 500 chars.",
-  "changes": ["Change 1", "Change 2", "Change 3"],
-  "coverLetter": "Cover letter under 500 chars.",
-  "resumeTips": ["Tip 1", "Tip 2", "Tip 3"]
+  "matchReason": "Your experience directly aligns with the core requirements.",
+  "tailoredResume": "FULL PROFESSIONAL RESUME HERE - Include summary highlighting relevant skills, experience section with accomplishments matching job keywords, skills section tailored to job requirements",
+  "changes": ["Emphasized leadership experience matching job requirements", "Highlighted quantifiable achievements in target technologies", "Reordered experience sections by job relevance", "Added industry-specific keywords from job description", "Strengthened metrics and impact statements"],
+  "coverLetter": "FULL PROFESSIONAL COVER LETTER - Personalized greeting, paragraph explaining fit for role, paragraph showing understanding of company/role, closing with call to action",
+  "resumeTips": ["Use exact keywords from the job description", "Quantify all achievements with metrics", "Lead with most relevant experience", "Highlight team leadership and impact", "Include technologies/tools matching job requirements"]
 }`;
 
   try {
+    console.log('📊 Sending analysis request to Gemini API...');
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 8000,
+          maxOutputTokens: 12000,
           responseMimeType: 'application/json'
         }
-      }
+      },
+      { timeout: 30000 }
     );
 
     const raw = response.data.candidates[0].content.parts[0].text;
+    console.log('📦 Raw response received, length:', raw.length);
     const clean = raw.replace(/```json|```/g, '').trim();
 
     try {
       const result = JSON.parse(clean);
+      console.log('✅ Successfully parsed AI response');
+      console.log('   - matchScore:', result.matchScore);
+      console.log('   - tailoredResume length:', result.tailoredResume?.length);
+      console.log('   - coverLetter length:', result.coverLetter?.length);
       res.json(result);
     } catch (parseErr) {
-      console.error('JSON Parse Error:', parseErr.message);
-      console.error('Raw:', raw.slice(0, 500));
+      console.error('❌ JSON Parse Error:', parseErr.message);
+      console.error('Raw response (first 500 chars):', raw.slice(0, 500));
 
-      // Try to extract whatever we can
+      // Improved fallback extraction
       const scoreMatch = raw.match(/"matchScore"\s*:\s*(\d+)/);
       const labelMatch = raw.match(/"matchLabel"\s*:\s*"([^"]+)"/);
-      const reasonMatch = raw.match(/"matchReason"\s*:\s*"([^"]+)"/);
+      const reasonMatch = raw.match(/"matchReason"\s*:\s*"([^"]*?)"/);
+      const tailoredMatch = raw.match(/"tailoredResume"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,/);
+      const coverMatch = raw.match(/"coverLetter"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,/);
+      const changesMatch = raw.match(/"changes"\s*:\s*\[([\s\S]*?)\]/);
+      const tipsMatch = raw.match(/"resumeTips"\s*:\s*\[([\s\S]*?)\]/);
 
-      res.json({
+      const extractArray = (str) => {
+        if (!str) return [];
+        return str.split(',').map(s => s.trim().replace(/^"|"$/g, '').slice(0, 200)).filter(s => s.length > 0);
+      };
+
+      const fallback = {
         matchScore: scoreMatch ? parseInt(scoreMatch[1]) : 75,
         matchLabel: labelMatch ? labelMatch[1] : 'Good Match',
-        matchReason: reasonMatch ? reasonMatch[1] : 'Strong alignment with job requirements.',
-        tailoredResume: 'Resume tailored successfully. Copy and edit as needed.',
-        changes: ['Keywords optimized', 'Experience reordered', 'Skills highlighted'],
-        coverLetter: 'Dear Hiring Manager, I am excited to apply for this role. My experience aligns well with your requirements. I look forward to discussing further.',
-        resumeTips: ['Add measurable achievements', 'Tailor skills section', 'Include relevant keywords']
-      });
+        matchReason: reasonMatch ? reasonMatch[1] : 'Your experience aligns with key job requirements.',
+        tailoredResume: tailoredMatch ? tailoredMatch[1].slice(0, 1000) : trimmedResume.slice(0, 800) + '\n\n[Your resume tailored for this role - key keywords and achievements highlighted to match job description]',
+        changes: extractArray(changesMatch ? changesMatch[1] : 'Keywords optimized, Experience reordered, Skills highlighted, Impact statements added, Technical skills emphasized'),
+        coverLetter: coverMatch ? coverMatch[1].slice(0, 600) : 'Dear Hiring Manager,\n\nI am excited to apply for this position. My background in [key skill] and experience with [relevant tech] make me a strong fit. I am confident I can contribute significantly to your team.\n\nBest regards',
+        resumeTips: extractArray(tipsMatch ? tipsMatch[1] : 'Use exact job keywords, Quantify achievements, Lead with relevant experience, Highlight specific technologies, Show impact with metrics')
+      };
+
+      console.log('📋 Using fallback response');
+      res.json(fallback);
     }
   } catch (err) {
-    console.error('Gemini API Error:', err.response?.data || err.message);
-    res.status(500).json({ error: 'AI analysis failed', detail: err.response?.data || err.message });
+    console.error('❌ Gemini API Error:', err.response?.data || err.message);
+    res.status(500).json({ 
+      error: 'AI analysis failed', 
+      detail: err.response?.data?.error?.message || err.message 
+    });
   }
 });
 

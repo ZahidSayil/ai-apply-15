@@ -14,40 +14,48 @@ export default function Loading() {
         const res = await axios.post('http://127.0.0.1:3001/analyze', { resumeText, jobText })
         localStorage.setItem('results', JSON.stringify(res.data))
         navigate('/results')
-      } catch (err) {
+      } catch {
         alert('AI analysis failed. Check your API key.')
         navigate('/job')
       }
     }
     run()
-  }, [])
+  }, [navigate])
 
-  const steps = ['Reading your resume...', 'Analyzing job requirements...', 'Tailoring your resume...', 'Writing cover letter...']
+  const steps = [
+    'Reading your resume',
+    'Analyzing job requirements', 
+    'Tailoring your resume',
+    'Writing cover letter'
+  ]
 
   return (
     <div style={styles.page}>
-      <div style={styles.card}>
-        <div style={styles.logo}>apply<span style={styles.accent}>ai</span></div>
-        <div style={styles.dots}>
-          <span style={{ ...styles.dot, animationDelay: '0s' }} />
-          <span style={{ ...styles.dot, animationDelay: '0.2s' }} />
-          <span style={{ ...styles.dot, animationDelay: '0.4s' }} />
+      <div style={styles.container}>
+        <div style={styles.loaderWrapper}>
+          <div style={styles.spinner} />
         </div>
-        <p style={styles.title}>AI is working its magic</p>
-        <div style={styles.stepList}>
-          {steps.map((s, i) => (
-            <div key={i} style={styles.stepRow}>
-              <span style={styles.stepDot}>✦</span>
-              <span style={styles.stepText}>{s}</span>
+        <h1 style={styles.title}>Analyzing your profile...</h1>
+        <p style={styles.subtitle}>This usually takes 10-15 seconds</p>
+        
+        <div style={styles.stepsList}>
+          {steps.map((step, i) => (
+            <div key={i} style={styles.step}>
+              <div style={{ ...styles.stepIcon, ...{ animation: `slide-in 0.4s ease ${i * 0.1}s both` } }}>
+                ✓
+              </div>
+              <span style={styles.stepText}>{step}</span>
             </div>
           ))}
         </div>
-        <p style={styles.sub}>Usually takes 10–15 seconds</p>
       </div>
       <style>{`
-        @keyframes bounce {
-          0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
-          40% { transform: scale(1); opacity: 1; }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes slide-in {
+          from { opacity: 0; transform: translateX(-10px); }
+          to { opacity: 1; transform: translateX(0); }
         }
       `}</style>
     </div>
@@ -55,16 +63,72 @@ export default function Loading() {
 }
 
 const styles = {
-  page: { minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' },
-  card: { width: '100%', maxWidth: '360px', textAlign: 'center' },
-  logo: { fontFamily: 'system-ui', fontSize: '22px', fontWeight: '700', color: '#fff', marginBottom: '32px', letterSpacing: '-1px' },
-  accent: { color: '#7c6af7' },
-  dots: { display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '24px' },
-  dot: { display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#7c6af7', animation: 'bounce 1.4s ease-in-out infinite' },
-  title: { fontSize: '18px', fontWeight: '600', color: '#fff', marginBottom: '24px' },
-  stepList: { textAlign: 'left', background: '#0f0f1a', borderRadius: '12px', padding: '16px', marginBottom: '20px' },
-  stepRow: { display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 0' },
-  stepDot: { color: '#7c6af7', fontSize: '10px' },
-  stepText: { fontSize: '13px', color: '#888' },
-  sub: { fontSize: '12px', color: '#444' }
+  page: { 
+    minHeight: '100vh', 
+    background: '#fff',
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+  },
+  container: {
+    width: '100%',
+    maxWidth: '400px',
+    textAlign: 'center',
+    padding: '20px'
+  },
+  loaderWrapper: {
+    marginBottom: '40px'
+  },
+  spinner: {
+    width: '50px',
+    height: '50px',
+    border: '3px solid #f0f0f0',
+    borderTop: '3px solid #3b82f6',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    margin: '0 auto'
+  },
+  title: {
+    fontSize: '28px',
+    fontWeight: '700',
+    color: '#1a1a1a',
+    margin: '0 0 8px 0'
+  },
+  subtitle: {
+    fontSize: '14px',
+    color: '#999',
+    margin: '0 0 40px 0'
+  },
+  stepsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px'
+  },
+  step: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '12px',
+    background: '#f5f5f5',
+    borderRadius: '8px'
+  },
+  stepIcon: {
+    width: '24px',
+    height: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#3b82f6',
+    color: '#fff',
+    borderRadius: '50%',
+    fontSize: '12px',
+    fontWeight: '600',
+    flexShrink: 0
+  },
+  stepText: {
+    fontSize: '14px',
+    color: '#666',
+    fontWeight: '500'
+  }
 }
