@@ -22,8 +22,13 @@ export default function Upload() {
       localStorage.setItem('resumeText', res.data.resumeText)
       localStorage.setItem('resumeFileName', file.name)
       navigate('/job')
-    } catch {
-      alert('Failed to parse PDF. Try again.')
+    } catch (err) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.detail ||
+        err?.message ||
+        'Upload failed'
+      alert(`${msg}\n\nIf you are running locally, use "npm run dev:all" so /api is available.`)
       setLoading(false)
     }
   }

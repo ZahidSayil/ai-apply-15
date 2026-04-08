@@ -7,17 +7,94 @@ import pdfParse from 'pdf-parse';
 import process from 'process';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import path from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-dotenv.config({ path: `${__dirname}/.env` });
+// Load env explicitly from the repo root `.env` (don't rely on cwd).
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+// Optionally allow a `backend/.env` for local overrides.
+dotenv.config({ path: path.resolve(__dirname, '.env'), override: false });
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function callGroq(prompt) {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY not configured');
+  }
+  const response = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: 'llama-3.1-8b-instant',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an expert professional resume writer. Return ONLY valid JSON. No markdown. No backticks. No extra text.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 2000,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
+    }
+  );
+
+  const raw = response.data?.choices?.[0]?.message?.content || '';
+  return raw.replace(/```json|```/g, '').trim();
+}
+
+function normalizeAnalyzeResult(result, { trimmedResume }) {
+  // Some models return nested JSON or structured objects; normalize to our UI schema.
+  let r = result
+  if (typeof r === 'string') {
+    try { r = JSON.parse(r) } catch { /* keep string */ }
+  }
+
+  // If tailoredResume/coverLetter are JSON-strings, decode them.
+  for (const key of ['tailoredResume', 'coverLetter']) {
+    if (typeof r?.[key] === 'string' && r[key].trim().startsWith('{')) {
+      try { r[key] = JSON.parse(r[key]) } catch { /* ignore */ }
+    }
+  }
+
+  const toText = (v) => {
+    if (typeof v === 'string') return v
+    if (v == null) return ''
+    if (typeof v === 'object') return JSON.stringify(v, null, 2)
+    return String(v)
+  }
+
+  const toArray = (v) => {
+    if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x : toText(x))).filter(Boolean)
+    if (typeof v === 'string') return v.split(',').map((s) => s.trim()).filter(Boolean)
+    return []
+  }
+
+  return {
+    matchScore: Number.isFinite(r?.matchScore) ? r.matchScore : parseInt(r?.matchScore, 10) || 75,
+    matchLabel: typeof r?.matchLabel === 'string' ? r.matchLabel : 'Good Match',
+    matchReason: typeof r?.matchReason === 'string' ? r.matchReason : 'Your experience aligns with key job requirements.',
+    tailoredResume: toText(r?.tailoredResume).slice(0, 4000) || trimmedResume.slice(0, 800),
+    coverLetter: toText(r?.coverLetter).slice(0, 2000),
+    changes: toArray(r?.changes).slice(0, 10),
+    resumeTips: toArray(r?.resumeTips).slice(0, 10),
+  }
+}
 
 // ✅ Verify API Keys are loaded
 console.log('🔑 API Keys loaded:');
 console.log('JINA_API_KEY:', process.env.JINA_API_KEY ? '✓ Loaded' : '✗ Missing');
-console.log('DEEPSEEK_API_KEY:', process.env.DEEPSEEK_API_KEY ? '✓ Loaded' : '✗ Missing');
-console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✓ Loaded' : '✗ Missing');
+console.log('QWEN_API_KEY:', process.env.QWEN_API_KEY ? '✓ Loaded' : '✗ Missing');
+console.log('DASHSCOPE_API_KEY:', process.env.DASHSCOPE_API_KEY ? '✓ Loaded' : '✗ Missing');
+console.log('GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✓ Loaded' : '✗ Missing');
 
 // Simple rate limiter (basic implementation)
 const rateLimit = new Map();
@@ -55,36 +132,82 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/test-deepseek', async (req, res) => {
-  if (!process.env.DEEPSEEK_API_KEY) {
-    return res.status(500).json({ error: 'DeepSeek API key not configured' });
+app.get('/test-groq', async (req, res) => {
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(500).json({ error: 'Groq API key not configured' });
   }
 
   try {
     const response = await axios.post(
-      'https://api.deepseek.com/v1/chat/completions',
+      'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'deepseek-chat',
-        messages: [{ role: 'user', content: 'Hello, just testing the API. Respond with "API working" only.' }],
-        max_tokens: 10
+        model: 'llama-3.1-8b-instant',
+        messages: [{ role: 'user', content: 'Hello, just testing the API. Respond with \"API working\" only.' }],
+        max_tokens: 10,
+        temperature: 0
       },
       {
         headers: {
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 15000
       }
     );
 
     res.json({
       status: 'success',
-      response: response.data.choices[0].message.content,
+      response: response.data.choices?.[0]?.message?.content,
       usage: response.data.usage
     });
   } catch (err) {
-    console.error('DeepSeek API Test Error:', err.response?.status, err.response?.data);
+    console.error('Groq API Test Error:', err.response?.status, err.response?.data);
     res.status(500).json({
-      error: 'DeepSeek API test failed',
+      error: 'Groq API test failed',
+      detail: err.response?.data || err.message
+    });
+  }
+});
+
+app.get('/test-qwen', async (req, res) => {
+  const qwenKey = process.env.QWEN_API_KEY || process.env.DASHSCOPE_API_KEY;
+  if (!qwenKey) {
+    return res.status(500).json({ error: 'QWEN_API_KEY (or DASHSCOPE_API_KEY) not configured' });
+  }
+
+  const baseUrl = process.env.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
+  const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+
+  try {
+    const response = await axios.post(
+      url,
+      {
+        model: process.env.QWEN_MODEL || 'qwen3.6-plus',
+        messages: [{ role: 'user', content: 'Respond with: QWEN_OK' }],
+        temperature: 0,
+        max_tokens: 20
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${qwenKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+
+    res.json({
+      status: 'success',
+      model: process.env.QWEN_MODEL || 'qwen3.6-plus',
+      baseUrl,
+      response: response.data?.choices?.[0]?.message?.content,
+      usage: response.data?.usage
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'error',
+      model: process.env.QWEN_MODEL || 'qwen3.6-plus',
+      baseUrl,
       detail: err.response?.data || err.message
     });
   }
@@ -139,6 +262,15 @@ app.post('/upload-resume', upload.single('resume'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     console.log('📄 Parsing PDF file:', req.file.originalname, `(${req.file.size} bytes)`);
+    // Basic sanity check: PDF files should start with "%PDF"
+    const header = req.file.buffer?.subarray?.(0, 4)?.toString?.('utf8');
+    if (header !== '%PDF') {
+      return res.status(400).json({
+        error: 'Invalid PDF file',
+        hint: 'This file does not look like a valid PDF. Try re-exporting your resume as a standard PDF.',
+      });
+    }
+
     const data = await pdfParse(req.file.buffer);
     
     if (!data.text || data.text.trim().length === 0) {
@@ -150,10 +282,14 @@ app.post('/upload-resume', upload.single('resume'), async (req, res) => {
     res.json({ resumeText: data.text.slice(0, 5000) });
   } catch (err) {
     console.error('❌ PDF parsing error:', err.message);
+    const msg = (err?.message || '').toLowerCase();
+    const isXref = msg.includes('xref');
     res.status(500).json({ 
       error: 'Failed to parse PDF', 
       detail: err.message,
-      hint: 'Make sure your PDF contains text (not just images). Try converting it or uploading a different resume.'
+      hint: isXref
+        ? 'Your PDF appears to be malformed (XRef table issue). Try: open it and "Print" → "Save as PDF", or export again from Google Docs/Word/Canva. Then re-upload.'
+        : 'Make sure your PDF contains text (not just images). Try converting it or uploading a different resume.'
     });
   }
 });
@@ -200,31 +336,69 @@ Return EXACTLY this JSON structure:
 }`;
 
   try {
-    console.log('📊 Sending analysis request to Gemini API...');
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 12000,
-          responseMimeType: 'application/json'
-        }
-      },
-      { timeout: 30000 }
-    );
+    const qwenKey = process.env.QWEN_API_KEY || process.env.DASHSCOPE_API_KEY;
+    if (!qwenKey) {
+      return res.status(500).json({ error: 'QWEN_API_KEY (or DASHSCOPE_API_KEY) not configured' });
+    }
 
-    const raw = response.data.candidates[0].content.parts[0].text;
+    console.log('📊 Sending analysis request to Qwen API...');
+    const qwenBaseUrl = process.env.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
+    const qwenUrl = `${qwenBaseUrl.replace(/\/$/, '')}/chat/completions`;
+    const qwenPayload = {
+      model: process.env.QWEN_MODEL || 'qwen3.6-plus',
+      messages: [
+        { role: 'system', content: 'Return ONLY valid JSON. No markdown. No backticks. No extra text.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 2000
+    };
+
+    // Retry on transient overloads (429/5xx/timeouts).
+    const backoffs = [0, 800, 1600, 2500];
+    let response;
+    let lastErr;
+    for (const wait of backoffs) {
+      if (wait) await sleep(wait);
+      try {
+        response = await axios.post(qwenUrl, qwenPayload, {
+          headers: {
+            Authorization: `Bearer ${qwenKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        });
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        const status = e?.response?.status;
+        const msg = e?.response?.data?.error?.message || e?.message || '';
+        const isOverload = status === 429 || status === 503 || status >= 500 || msg.toLowerCase().includes('timeout');
+        if (!isOverload) break;
+        console.warn('⚠️ Qwen overloaded, retrying...', { status, msg: msg.slice(0, 120) });
+      }
+    }
+
+    let raw;
+    if (response) {
+      raw = response.data?.choices?.[0]?.message?.content || '';
+    } else {
+      console.warn('⚠️ Qwen still overloaded; falling back to Groq...');
+      raw = await callGroq(prompt);
+    }
+
     console.log('📦 Raw response received, length:', raw.length);
     const clean = raw.replace(/```json|```/g, '').trim();
 
     try {
       const result = JSON.parse(clean);
+      const normalized = normalizeAnalyzeResult(result, { trimmedResume });
       console.log('✅ Successfully parsed AI response');
-      console.log('   - matchScore:', result.matchScore);
-      console.log('   - tailoredResume length:', result.tailoredResume?.length);
-      console.log('   - coverLetter length:', result.coverLetter?.length);
-      res.json(result);
+      console.log('   - matchScore:', normalized.matchScore);
+      console.log('   - tailoredResume length:', normalized.tailoredResume?.length);
+      console.log('   - coverLetter length:', normalized.coverLetter?.length);
+      res.json(normalized);
     } catch (parseErr) {
       console.error('❌ JSON Parse Error:', parseErr.message);
       console.error('Raw response (first 500 chars):', raw.slice(0, 500));
@@ -254,7 +428,7 @@ Return EXACTLY this JSON structure:
       };
 
       console.log('📋 Using fallback response');
-      res.json(fallback);
+      res.json(normalizeAnalyzeResult(fallback, { trimmedResume }));
     }
   } catch (err) {
     console.error('❌ Gemini API Error:', err.response?.data || err.message);

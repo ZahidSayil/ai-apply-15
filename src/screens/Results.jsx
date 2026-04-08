@@ -12,6 +12,16 @@ export default function Results() {
   if (!raw) { navigate('/'); return null }
   const data = JSON.parse(raw)
 
+  const toText = (v) => {
+    if (typeof v === 'string') return v
+    if (v == null) return ''
+    if (typeof v === 'object') return JSON.stringify(v, null, 2)
+    return String(v)
+  }
+
+  const resumeText = toText(data.tailoredResume)
+  const coverText = toText(data.coverLetter)
+
   function copyText(text, label) {
     navigator.clipboard.writeText(text)
     setCopied(label)
@@ -109,9 +119,9 @@ export default function Results() {
         {/* Resume Tab */}
         {activeTab === 'resume' && (
           <div style={styles.tabContent}>
-            <div style={styles.textBox}>{data.tailoredResume}</div>
+            <div style={styles.textBox}>{resumeText}</div>
             <div style={styles.btnRow}>
-              <button style={styles.copyBtn} onClick={() => copyText(data.tailoredResume, 'resume')}>
+              <button style={styles.copyBtn} onClick={() => copyText(resumeText, 'resume')}>
                 {copied === 'resume' ? '✓ Copied' : '📋 Copy'}
               </button>
               <div style={styles.downloadMenu}>
@@ -120,8 +130,8 @@ export default function Results() {
                 </button>
                 {showFormats === 'resume' && (
                   <div style={styles.formatOptions}>
-                    <button style={styles.formatBtn} onClick={() => { downloadPDF(data.tailoredResume, 'tailored-resume.pdf'); setShowFormats(null); }}>PDF</button>
-                    <button style={styles.formatBtn} onClick={() => { downloadText(data.tailoredResume, 'tailored-resume.txt'); setShowFormats(null); }}>TXT</button>
+                    <button style={styles.formatBtn} onClick={() => { downloadPDF(resumeText, 'tailored-resume.pdf'); setShowFormats(null); }}>PDF</button>
+                    <button style={styles.formatBtn} onClick={() => { downloadText(resumeText, 'tailored-resume.txt'); setShowFormats(null); }}>TXT</button>
                   </div>
                 )}
               </div>
@@ -132,9 +142,9 @@ export default function Results() {
         {/* Cover Letter Tab */}
         {activeTab === 'cover' && (
           <div style={styles.tabContent}>
-            <div style={styles.textBox}>{data.coverLetter}</div>
+            <div style={styles.textBox}>{coverText}</div>
             <div style={styles.btnRow}>
-              <button style={styles.copyBtn} onClick={() => copyText(data.coverLetter, 'cover')}>
+              <button style={styles.copyBtn} onClick={() => copyText(coverText, 'cover')}>
                 {copied === 'cover' ? '✓ Copied' : '📋 Copy'}
               </button>
               <div style={styles.downloadMenu}>
@@ -143,8 +153,8 @@ export default function Results() {
                 </button>
                 {showFormats === 'cover' && (
                   <div style={styles.formatOptions}>
-                    <button style={styles.formatBtn} onClick={() => { downloadPDF(data.coverLetter, 'cover-letter.pdf'); setShowFormats(null); }}>PDF</button>
-                    <button style={styles.formatBtn} onClick={() => { downloadText(data.coverLetter, 'cover-letter.txt'); setShowFormats(null); }}>TXT</button>
+                    <button style={styles.formatBtn} onClick={() => { downloadPDF(coverText, 'cover-letter.pdf'); setShowFormats(null); }}>PDF</button>
+                    <button style={styles.formatBtn} onClick={() => { downloadText(coverText, 'cover-letter.txt'); setShowFormats(null); }}>TXT</button>
                   </div>
                 )}
               </div>
@@ -297,7 +307,7 @@ const styles = {
   },
   tabActive: { 
     color: '#1a1a1a',
-    borderBottomColor: '#3b82f6'
+    borderBottom: '3px solid #3b82f6'
   },
   tabContent: { 
     background: '#f9f9f9', 

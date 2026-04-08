@@ -40,15 +40,20 @@ This repo is ready to deploy as a **single Vercel project**:
 ### Environment variables (Vercel → Project → Settings → Environment Variables)
 
 - **Required**:
-  - `GEMINI_API_KEY`
+  - `QWEN_API_KEY` (or `DASHSCOPE_API_KEY`)
 - **Optional (for job URL scraping)**:
   - `JINA_API_KEY`
-- **Optional (only for `/api/test-deepseek`)**:
-  - `DEEPSEEK_API_KEY`
+- **Optional (fallback LLM + local `/test-groq`)**:
+  - `GROQ_API_KEY` (used automatically if Qwen is overloaded)
+
+### Optional Qwen settings
+
+- `QWEN_BASE_URL` (defaults to DashScope OpenAI-compatible): `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
+- `QWEN_MODEL` (defaults to `qwen3.6-plus`)
 
 ### Production endpoints
 
 - `POST /api/upload-resume` (multipart form-data, field name: `resume`)
 - `POST /api/scrape` `{ "url": "https://..." }`
 - `POST /api/analyze` `{ "resumeText": "...", "jobText": "..." }`
-- `GET /api/test-deepseek`
+- `GET /api/test-qwen`

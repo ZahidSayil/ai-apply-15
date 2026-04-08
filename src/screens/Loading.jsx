@@ -1,11 +1,16 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 
 export default function Loading() {
   const navigate = useNavigate()
+  const didRun = useRef(false)
 
   useEffect(() => {
+    // React StrictMode runs effects twice in dev; guard to avoid duplicate /analyze calls.
+    if (didRun.current) return
+    didRun.current = true
+
     async function run() {
       const resumeText = localStorage.getItem('resumeText')
       const jobText = localStorage.getItem('jobText')
@@ -15,7 +20,7 @@ export default function Loading() {
         localStorage.setItem('results', JSON.stringify(res.data))
         navigate('/results')
       } catch {
-        alert('AI analysis failed. Check your API key.')
+        alert('AI analysis failed. If this is a temporary overload, wait ~30 seconds and try again.')
         navigate('/job')
       }
     }

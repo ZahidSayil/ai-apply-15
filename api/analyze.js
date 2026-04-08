@@ -1,5 +1,112 @@
 import axios from 'axios'
+import process from 'process'
 import { checkRateLimit, readJson, sendJson, getRequiredEnv } from './_utils.js'
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+function normalizeAnalyzeResult(result, { trimmedResume }) {
+  let r = result
+  if (typeof r === 'string') {
+    try {
+      r = JSON.parse(r)
+    } catch {
+      // keep string
+    }
+  }
+
+  for (const key of ['tailoredResume', 'coverLetter']) {
+    if (typeof r?.[key] === 'string' && r[key].trim().startsWith('{')) {
+      try {
+        r[key] = JSON.parse(r[key])
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const toText = (v) => {
+    if (typeof v === 'string') return v
+    if (v == null) return ''
+    if (typeof v === 'object') return JSON.stringify(v, null, 2)
+    return String(v)
+  }
+
+  const toArray = (v) => {
+    if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x : toText(x))).filter(Boolean)
+    if (typeof v === 'string') return v.split(',').map((s) => s.trim()).filter(Boolean)
+    return []
+  }
+
+  return {
+    matchScore: Number.isFinite(r?.matchScore) ? r.matchScore : parseInt(r?.matchScore, 10) || 75,
+    matchLabel: typeof r?.matchLabel === 'string' ? r.matchLabel : 'Good Match',
+    matchReason: typeof r?.matchReason === 'string' ? r.matchReason : 'Your experience aligns with key job requirements.',
+    tailoredResume: toText(r?.tailoredResume).slice(0, 4000) || trimmedResume.slice(0, 800),
+    coverLetter: toText(r?.coverLetter).slice(0, 2000),
+    changes: toArray(r?.changes).slice(0, 10),
+    resumeTips: toArray(r?.resumeTips).slice(0, 10),
+  }
+}
+
+async function callGroq({ groqKey, prompt }) {
+  const response = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: 'llama-3.1-8b-instant',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an expert professional resume writer. Return ONLY valid JSON. No markdown. No backticks. No extra text.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 2000,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${groqKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30_000,
+    },
+  )
+
+  const raw = response.data?.choices?.[0]?.message?.content || ''
+  // Some models occasionally wrap in fences; strip just in case.
+  return raw.replace(/```json|```/g, '').trim()
+}
+
+async function callQwen({ qwenKey, prompt }) {
+  const baseUrl = process.env.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+  const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`
+
+  const response = await axios.post(
+    url,
+    {
+      model: process.env.QWEN_MODEL || 'qwen3.6-plus',
+      messages: [
+        { role: 'system', content: 'Return ONLY valid JSON. No markdown. No backticks. No extra text.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 2000,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${qwenKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30_000,
+    },
+  )
+
+  const raw = response.data?.choices?.[0]?.message?.content || ''
+  return raw.replace(/```json|```/g, '').trim()
+}
 
 export default async function handler(req, res) {
   if (!checkRateLimit(req)) return sendJson(res, 429, { error: 'Too many requests. Please try again later.' })
@@ -52,36 +159,49 @@ Return EXACTLY this JSON structure:
 }`
 
   try {
-    const geminiKey = getRequiredEnv('GEMINI_API_KEY')
+    let clean = null
 
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-      {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 12000,
-          responseMimeType: 'application/json',
-        },
-      },
-      { timeout: 30_000 },
-    )
+    // 1) Try Qwen first (primary)
+    try {
+      const qwenKey = process.env.QWEN_API_KEY || getRequiredEnv('DASHSCOPE_API_KEY')
 
-    const raw = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-    const clean = raw.replace(/```json|```/g, '').trim()
+      // Retry on transient overloads (429/5xx/timeouts).
+      const backoffs = [0, 800, 1600, 2500]
+      let lastErr
+      for (const wait of backoffs) {
+        if (wait) await sleep(wait)
+        try {
+          clean = await callQwen({ qwenKey, prompt })
+          lastErr = null
+          break
+        } catch (e) {
+          lastErr = e
+          const status = e?.response?.status
+          const msg = e?.response?.data?.error?.message || e?.message || ''
+          const isOverload = status === 429 || status === 503 || status >= 500 || msg.toLowerCase().includes('timeout')
+          if (!isOverload) break
+        }
+      }
+      if (!clean) throw lastErr
+    } catch (qwenErr) {
+      // 2) Fallback to Groq if configured
+      const groqKey = process.env.GROQ_API_KEY
+      if (!groqKey) throw qwenErr
+      clean = await callGroq({ groqKey, prompt })
+    }
 
     try {
       const result = JSON.parse(clean)
-      return sendJson(res, 200, result)
+      return sendJson(res, 200, normalizeAnalyzeResult(result, { trimmedResume }))
     } catch (parseErr) {
       // Fallback extraction (mirrors previous backend behavior)
-      const scoreMatch = raw.match(/"matchScore"\s*:\s*(\d+)/)
-      const labelMatch = raw.match(/"matchLabel"\s*:\s*"([^"]+)"/)
-      const reasonMatch = raw.match(/"matchReason"\s*:\s*"([^"]*?)"/)
-      const tailoredMatch = raw.match(/"tailoredResume"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,/)
-      const coverMatch = raw.match(/"coverLetter"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,/)
-      const changesMatch = raw.match(/"changes"\s*:\s*\[([\s\S]*?)\]/)
-      const tipsMatch = raw.match(/"resumeTips"\s*:\s*\[([\s\S]*?)\]/)
+      const scoreMatch = clean.match(/"matchScore"\s*:\s*(\d+)/)
+      const labelMatch = clean.match(/"matchLabel"\s*:\s*"([^"]+)"/)
+      const reasonMatch = clean.match(/"matchReason"\s*:\s*"([^"]*?)"/)
+      const tailoredMatch = clean.match(/"tailoredResume"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,/)
+      const coverMatch = clean.match(/"coverLetter"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,/)
+      const changesMatch = clean.match(/"changes"\s*:\s*\[([\s\S]*?)\]/)
+      const tipsMatch = clean.match(/"resumeTips"\s*:\s*\[([\s\S]*?)\]/)
 
       const extractArray = (str) => {
         if (!str) return []
@@ -110,7 +230,7 @@ Return EXACTLY this JSON structure:
         parseError: parseErr?.message,
       }
 
-      return sendJson(res, 200, fallback)
+      return sendJson(res, 200, normalizeAnalyzeResult(fallback, { trimmedResume }))
     }
   } catch (err) {
     return sendJson(res, 500, {

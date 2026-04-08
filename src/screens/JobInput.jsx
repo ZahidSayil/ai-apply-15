@@ -153,7 +153,7 @@ const styles = {
   },
   tabActive: {
     color: '#1a1a1a',
-    borderBottomColor: '#3b82f6'
+    borderBottom: '3px solid #3b82f6'
   },
   input: { 
     width: '100%', 
