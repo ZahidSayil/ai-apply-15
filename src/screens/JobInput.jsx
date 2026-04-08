@@ -13,7 +13,7 @@ export default function JobInput() {
     if (!url.trim()) return alert('Paste a job URL first')
     setLoading(true)
     try {
-      const scrape = await axios.post('http://127.0.0.1:3001/scrape', { url })
+      const scrape = await axios.post('/api/scrape', { url })
       localStorage.setItem('jobText', scrape.data.jobText)
       localStorage.setItem('jobUrl', url)
       navigate('/loading')

@@ -1,16 +1,54 @@
-# React + Vite
+# ApplyAI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+ApplyAI is a React + Vite app with Vercel Serverless Functions that:
 
-Currently, two official plugins are available:
+- Uploads a **PDF resume**, extracts text, and stores it in the browser
+- Takes a **job URL** (scrape via Jina) or **pasted job description**
+- Uses **Gemini** to generate a tailored resume + cover letter + match score
+- Lets you **copy** results and **download** as PDF/TXT
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Local development
 
-## React Compiler
+- **Frontend**:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm install
+npm run dev
+```
 
-## Expanding the ESLint configuration
+- **Backend (legacy Express, optional)**:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm run dev:backend
+```
+
+Note: the Vercel-style API lives in `api/` and is what production uses on Vercel.
+
+## Deploy to Vercel (recommended)
+
+This repo is ready to deploy as a **single Vercel project**:
+
+- Static frontend (Vite build output in `dist/`)
+- Backend endpoints as serverless functions under `api/`
+
+### Vercel project settings
+
+- **Framework Preset**: Vite
+- **Build Command**: `npm run build`
+- **Output Directory**: `dist`
+
+### Environment variables (Vercel → Project → Settings → Environment Variables)
+
+- **Required**:
+  - `GEMINI_API_KEY`
+- **Optional (for job URL scraping)**:
+  - `JINA_API_KEY`
+- **Optional (only for `/api/test-deepseek`)**:
+  - `DEEPSEEK_API_KEY`
+
+### Production endpoints
+
+- `POST /api/upload-resume` (multipart form-data, field name: `resume`)
+- `POST /api/scrape` `{ "url": "https://..." }`
+- `POST /api/analyze` `{ "resumeText": "...", "jobText": "..." }`
+- `GET /api/test-deepseek`

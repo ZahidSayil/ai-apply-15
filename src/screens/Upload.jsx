@@ -18,7 +18,7 @@ export default function Upload() {
     const formData = new FormData()
     formData.append('resume', file)
     try {
-      const res = await axios.post('http://127.0.0.1:3001/upload-resume', formData)
+      const res = await axios.post('/api/upload-resume', formData)
       localStorage.setItem('resumeText', res.data.resumeText)
       localStorage.setItem('resumeFileName', file.name)
       navigate('/job')

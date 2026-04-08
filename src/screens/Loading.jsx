@@ -11,7 +11,7 @@ export default function Loading() {
       const jobText = localStorage.getItem('jobText')
       if (!resumeText || !jobText) { navigate('/'); return }
       try {
-        const res = await axios.post('http://127.0.0.1:3001/analyze', { resumeText, jobText })
+        const res = await axios.post('/api/analyze', { resumeText, jobText })
         localStorage.setItem('results', JSON.stringify(res.data))
         navigate('/results')
       } catch {
