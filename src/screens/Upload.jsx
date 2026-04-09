@@ -45,12 +45,12 @@ export default function Upload() {
       <div style={styles.container}>
         {/* Brand */}
         <div style={styles.brand}>
-          apply<span style={styles.brandAccent}>ai</span>
+          CV<span style={styles.brandAccent}>ibe</span>
         </div>
 
         <div style={styles.header}>
           <h1 style={styles.title}>Land your dream job</h1>
-          <p style={styles.subtitle}>Upload your resume and we'll tailor it for any position</p>
+          <p style={styles.subtitle}>Upload your resume and Give your resume the right vibe</p>
         </div>
 
         {error && (
