@@ -7,86 +7,124 @@ export default function JobInput() {
   const [jobText, setJobText] = useState('')
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState('url')
+  const [error, setError] = useState('')
   const navigate = useNavigate()
 
-  async function handleAnalyze() {
-    if (!url.trim()) return alert('Paste a job URL first')
+  const resumeName = localStorage.getItem('resumeFileName') || 'your resume'
+
+  async function handleScrape() {
+    if (!url.trim()) return setError('Please paste a job URL first')
+    setError('')
     setLoading(true)
+
     try {
-      const scrape = await axios.post('/api/scrape', { url })
-      localStorage.setItem('jobText', scrape.data.jobText)
-      localStorage.setItem('jobUrl', url)
-      navigate('/loading')
+      const res = await axios.post('/api/scrape', { url }, { timeout: 15000 })
+
+      if (res.data.jobText) {
+        localStorage.setItem('jobText', res.data.jobText)
+        localStorage.setItem('jobUrl', url)
+        navigate('/loading')
+      } else {
+        // Scraping was blocked — switch to paste tab
+        setError(res.data.message || 'This site blocks scrapers. Please paste the job description instead.')
+        setTab('text')
+        setLoading(false)
+      }
     } catch {
-      alert('Could not fetch job. Try pasting the description instead.')
+      setError('Could not fetch that URL. Try pasting the job description instead.')
+      setTab('text')
       setLoading(false)
     }
   }
 
   function handlePastedText() {
-    if (jobText.length < 50) return alert('Please paste at least 50 characters')
-    localStorage.setItem('jobText', jobText)
+    if (jobText.trim().length < 50) return setError('Please paste at least 50 characters of the job description')
+    setError('')
+    localStorage.setItem('jobText', jobText.trim())
     navigate('/loading')
   }
 
   return (
     <div style={styles.page}>
       <div style={styles.container}>
-        <button style={styles.backBtn} onClick={() => navigate('/')}>← Back</button>
+        <button style={styles.backBtn} onClick={() => navigate('/')}>
+          ← Back
+        </button>
 
         <div style={styles.header}>
           <h1 style={styles.title}>Enter job details</h1>
-          <p style={styles.subtitle}>Paste the job URL or description to analyze</p>
+          <p style={styles.subtitle}>
+            Using <strong>{resumeName}</strong> — paste the job URL or description
+          </p>
         </div>
 
+        {error && (
+          <div style={styles.errorBox}>
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Tabs */}
         <div style={styles.tabs}>
-          <button 
+          <button
             style={{ ...styles.tab, ...(tab === 'url' ? styles.tabActive : {}) }}
-            onClick={() => setTab('url')}
+            onClick={() => { setTab('url'); setError('') }}
           >
-            URL
+            🔗 Paste URL
           </button>
-          <button 
+          <button
             style={{ ...styles.tab, ...(tab === 'text' ? styles.tabActive : {}) }}
-            onClick={() => setTab('text')}
+            onClick={() => { setTab('text'); setError('') }}
           >
-            Paste Text
+            📝 Paste Text
           </button>
         </div>
 
-        {tab === 'url' ? (
-          <div>
+        {/* URL Tab */}
+        {tab === 'url' && (
+          <div style={styles.tabPanel}>
             <input
               style={styles.input}
               type="url"
-              placeholder="https://jobs.lever.co/company/role"
+              placeholder="https://jobs.lever.co/company/role..."
               value={url}
               onChange={e => setUrl(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleAnalyze()}
+              onKeyDown={e => e.key === 'Enter' && handleScrape()}
+              disabled={loading}
             />
             <button
-              style={{ ...styles.btn, ...(loading ? styles.btnDisabled : {}) }}
-              onClick={handleAnalyze}
-              disabled={loading}
+              style={{ ...styles.btn, ...(loading || !url.trim() ? styles.btnDisabled : {}) }}
+              onClick={handleScrape}
+              disabled={loading || !url.trim()}
             >
-              {loading ? 'Fetching...' : 'Analyze & Tailor'}
+              {loading ? '⏳ Fetching job details...' : 'Analyze & Tailor →'}
             </button>
+            <p style={styles.hint}>
+              Works best with LinkedIn, Lever, Greenhouse, Workday, and Indeed
+            </p>
           </div>
-        ) : (
-          <div>
+        )}
+
+        {/* Paste Tab */}
+        {tab === 'text' && (
+          <div style={styles.tabPanel}>
             <textarea
               style={styles.textarea}
-              placeholder="Paste the job description here..."
-              rows={8}
+              placeholder="Paste the full job description here — include title, requirements, qualifications, responsibilities..."
+              rows={10}
               value={jobText}
               onChange={e => setJobText(e.target.value)}
             />
-            <button 
-              style={{ ...styles.btn, ...(jobText.length < 50 ? styles.btnDisabled : {}) }}
+            <div style={styles.charCount}>
+              {jobText.length} characters {jobText.length < 50 ? `(${50 - jobText.length} more needed)` : '✓'}
+            </div>
+            <button
+              style={{ ...styles.btn, ...(jobText.trim().length < 50 ? styles.btnDisabled : {}) }}
               onClick={handlePastedText}
-              disabled={jobText.length < 50}
+              disabled={jobText.trim().length < 50}
             >
-              Continue with this text
+              Analyze & Tailor →
             </button>
           </div>
         )}
@@ -96,106 +134,140 @@ export default function JobInput() {
 }
 
 const styles = {
-  page: { 
-    minHeight: '100vh', 
-    background: '#fff',
-    display: 'flex', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
+  page: {
+    minHeight: '100vh',
+    background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 50%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: '20px',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
   },
-  container: { 
-    width: '100%', 
-    maxWidth: '500px'
+  container: {
+    width: '100%',
+    maxWidth: '520px',
+    animation: 'fadeIn 0.4s ease',
   },
   backBtn: {
     background: 'none',
     border: 'none',
-    fontSize: '15px',
-    color: '#666',
+    fontSize: '14px',
+    color: '#6b7280',
     cursor: 'pointer',
-    padding: '0 0 24px 0',
-    fontWeight: '500'
+    padding: '0 0 20px 0',
+    fontWeight: '500',
   },
-  header: { 
-    marginBottom: '32px', 
-    textAlign: 'center'
+  header: {
+    marginBottom: '28px',
+    textAlign: 'center',
   },
-  title: { 
-    fontSize: '32px', 
-    fontWeight: '700', 
-    color: '#1a1a1a', 
-    margin: '0 0 12px 0',
-    lineHeight: '1.2'
+  title: {
+    fontSize: '30px',
+    fontWeight: '800',
+    color: '#111827',
+    margin: '0 0 10px 0',
+    letterSpacing: '-0.5px',
   },
-  subtitle: { 
-    fontSize: '16px', 
-    color: '#666', 
-    margin: '0'
+  subtitle: {
+    fontSize: '15px',
+    color: '#6b7280',
+    margin: '0',
+    lineHeight: '1.5',
+  },
+  errorBox: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    padding: '12px 16px',
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    borderRadius: '10px',
+    marginBottom: '16px',
+    fontSize: '13px',
+    color: '#991b1b',
+    lineHeight: '1.5',
   },
   tabs: {
     display: 'flex',
-    gap: '12px',
-    marginBottom: '24px',
-    borderBottom: '1px solid #e0e0e0'
+    gap: '4px',
+    marginBottom: '20px',
+    background: '#f3f4f6',
+    borderRadius: '10px',
+    padding: '4px',
   },
   tab: {
-    background: 'none',
+    flex: 1,
+    background: 'transparent',
     border: 'none',
-    borderBottom: '3px solid transparent',
-    padding: '12px 0',
-    fontSize: '15px',
+    borderRadius: '8px',
+    padding: '10px 0',
+    fontSize: '14px',
     fontWeight: '600',
-    color: '#999',
+    color: '#6b7280',
     cursor: 'pointer',
-    transition: 'all 0.3s ease'
+    transition: 'all 0.2s ease',
   },
   tabActive: {
-    color: '#1a1a1a',
-    borderBottom: '3px solid #3b82f6'
+    background: '#ffffff',
+    color: '#111827',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
   },
-  input: { 
-    width: '100%', 
-    padding: '12px 16px', 
-    borderRadius: '8px', 
-    border: '1px solid #e0e0e0', 
-    background: '#fff', 
-    color: '#1a1a1a', 
+  tabPanel: {
+    animation: 'fadeIn 0.3s ease',
+  },
+  input: {
+    width: '100%',
+    padding: '14px 16px',
+    borderRadius: '10px',
+    border: '1px solid #d1d5db',
+    background: '#ffffff',
+    color: '#111827',
     fontSize: '15px',
-    marginBottom: '16px', 
+    marginBottom: '12px',
     outline: 'none',
     boxSizing: 'border-box',
-    transition: 'border-color 0.3s ease'
+    transition: 'border-color 0.2s ease',
   },
-  textarea: { 
-    width: '100%', 
-    padding: '12px 16px', 
-    borderRadius: '8px', 
-    border: '1px solid #e0e0e0', 
-    background: '#fff', 
-    color: '#1a1a1a', 
-    fontSize: '15px',
-    marginBottom: '16px', 
+  textarea: {
+    width: '100%',
+    padding: '14px 16px',
+    borderRadius: '10px',
+    border: '1px solid #d1d5db',
+    background: '#ffffff',
+    color: '#111827',
+    fontSize: '14px',
+    marginBottom: '4px',
     outline: 'none',
     boxSizing: 'border-box',
     fontFamily: 'inherit',
-    resize: 'vertical'
+    resize: 'vertical',
+    lineHeight: '1.6',
   },
-  btn: { 
-    width: '100%', 
-    padding: '12px 16px', 
-    borderRadius: '8px', 
-    border: 'none', 
-    background: '#3b82f6', 
-    color: '#fff', 
-    fontSize: '15px', 
-    fontWeight: '600', 
+  charCount: {
+    fontSize: '12px',
+    color: '#9ca3af',
+    marginBottom: '12px',
+    textAlign: 'right',
+  },
+  btn: {
+    width: '100%',
+    padding: '14px 16px',
+    borderRadius: '10px',
+    border: 'none',
+    background: '#2563eb',
+    color: '#fff',
+    fontSize: '15px',
+    fontWeight: '600',
     cursor: 'pointer',
-    transition: 'all 0.3s ease'
+    transition: 'all 0.2s ease',
   },
-  btnDisabled: { 
-    opacity: 0.5, 
-    cursor: 'not-allowed' 
-  }
+  btnDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  },
+  hint: {
+    fontSize: '12px',
+    color: '#9ca3af',
+    marginTop: '12px',
+    textAlign: 'center',
+  },
 }

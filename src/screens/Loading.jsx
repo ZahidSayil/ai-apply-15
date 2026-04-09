@@ -1,139 +1,233 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
+
+const STEPS = [
+  { label: 'Reading your resume', duration: 2000 },
+  { label: 'Analyzing job requirements', duration: 3000 },
+  { label: 'Matching skills & experience', duration: 4000 },
+  { label: 'Tailoring your resume', duration: 5000 },
+  { label: 'Writing cover letter', duration: 6000 },
+]
 
 export default function Loading() {
   const navigate = useNavigate()
   const didRun = useRef(false)
+  const [activeStep, setActiveStep] = useState(0)
+  const [error, setError] = useState('')
 
+  // Animate steps
   useEffect(() => {
-    // React StrictMode runs effects twice in dev; guard to avoid duplicate /analyze calls.
+    const timers = STEPS.map((_, i) =>
+      setTimeout(() => setActiveStep(i), STEPS[i].duration)
+    )
+    return () => timers.forEach(clearTimeout)
+  }, [])
+
+  // Call API
+  useEffect(() => {
     if (didRun.current) return
     didRun.current = true
 
     async function run() {
       const resumeText = localStorage.getItem('resumeText')
       const jobText = localStorage.getItem('jobText')
-      if (!resumeText || !jobText) { navigate('/'); return }
+
+      if (!resumeText || !jobText) {
+        navigate('/')
+        return
+      }
+
       try {
-        const res = await axios.post('/api/analyze', { resumeText, jobText })
+        const res = await axios.post(
+          '/api/analyze',
+          { resumeText, jobText },
+          { timeout: 60000 } // 60s timeout for AI
+        )
         localStorage.setItem('results', JSON.stringify(res.data))
         navigate('/results')
-      } catch {
-        alert('AI analysis failed. If this is a temporary overload, wait ~30 seconds and try again.')
-        navigate('/job')
+      } catch (err) {
+        const msg = err?.response?.data?.error || err?.message || 'Analysis failed'
+        setError(msg)
       }
     }
     run()
   }, [navigate])
 
-  const steps = [
-    'Reading your resume',
-    'Analyzing job requirements', 
-    'Tailoring your resume',
-    'Writing cover letter'
-  ]
+  if (error) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.container}>
+          <div style={styles.errorIcon}>😞</div>
+          <h1 style={styles.errorTitle}>Analysis Failed</h1>
+          <p style={styles.errorText}>{error}</p>
+          <button style={styles.retryBtn} onClick={() => { setError(''); didRun.current = false; window.location.reload() }}>
+            🔄 Try Again
+          </button>
+          <button style={styles.backBtn} onClick={() => navigate('/job')}>
+            ← Go Back
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={styles.page}>
       <div style={styles.container}>
-        <div style={styles.loaderWrapper}>
-          <div style={styles.spinner} />
-        </div>
-        <h1 style={styles.title}>Analyzing your profile...</h1>
-        <p style={styles.subtitle}>This usually takes 10-15 seconds</p>
-        
+        <div style={styles.spinner} />
+        <h1 style={styles.title}>Tailoring your resume...</h1>
+        <p style={styles.subtitle}>This usually takes 15–30 seconds</p>
+
         <div style={styles.stepsList}>
-          {steps.map((step, i) => (
-            <div key={i} style={styles.step}>
-              <div style={{ ...styles.stepIcon, ...{ animation: `slide-in 0.4s ease ${i * 0.1}s both` } }}>
-                ✓
+          {STEPS.map((step, i) => {
+            const isActive = i === activeStep
+            const isDone = i < activeStep
+            return (
+              <div key={i} style={{
+                ...styles.step,
+                ...(isActive ? styles.stepActive : {}),
+                ...(isDone ? styles.stepDone : {}),
+              }}>
+                <div style={{
+                  ...styles.stepDot,
+                  ...(isDone ? styles.stepDotDone : {}),
+                  ...(isActive ? styles.stepDotActive : {}),
+                }}>
+                  {isDone ? '✓' : (i + 1)}
+                </div>
+                <span style={{
+                  ...styles.stepText,
+                  ...(isActive ? styles.stepTextActive : {}),
+                  ...(isDone ? styles.stepTextDone : {}),
+                }}>{step.label}</span>
               </div>
-              <span style={styles.stepText}>{step}</span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        @keyframes slide-in {
-          from { opacity: 0; transform: translateX(-10px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-      `}</style>
     </div>
   )
 }
 
 const styles = {
-  page: { 
-    minHeight: '100vh', 
-    background: '#fff',
-    display: 'flex', 
-    alignItems: 'center', 
+  page: {
+    minHeight: '100vh',
+    background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 50%)',
+    display: 'flex',
+    alignItems: 'center',
     justifyContent: 'center',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    padding: '20px',
   },
   container: {
     width: '100%',
     maxWidth: '400px',
     textAlign: 'center',
-    padding: '20px'
-  },
-  loaderWrapper: {
-    marginBottom: '40px'
+    animation: 'fadeIn 0.5s ease',
   },
   spinner: {
-    width: '50px',
-    height: '50px',
-    border: '3px solid #f0f0f0',
-    borderTop: '3px solid #3b82f6',
+    width: '48px',
+    height: '48px',
+    border: '3px solid #e5e7eb',
+    borderTop: '3px solid #2563eb',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
-    margin: '0 auto'
+    margin: '0 auto 32px auto',
   },
   title: {
-    fontSize: '28px',
-    fontWeight: '700',
-    color: '#1a1a1a',
-    margin: '0 0 8px 0'
+    fontSize: '26px',
+    fontWeight: '800',
+    color: '#111827',
+    margin: '0 0 8px 0',
+    letterSpacing: '-0.3px',
   },
   subtitle: {
     fontSize: '14px',
-    color: '#999',
-    margin: '0 0 40px 0'
+    color: '#9ca3af',
+    margin: '0 0 36px 0',
   },
   stepsList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px'
+    gap: '8px',
+    textAlign: 'left',
   },
   step: {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
-    padding: '12px',
-    background: '#f5f5f5',
-    borderRadius: '8px'
+    padding: '12px 16px',
+    background: '#f9fafb',
+    borderRadius: '10px',
+    transition: 'all 0.3s ease',
   },
-  stepIcon: {
-    width: '24px',
-    height: '24px',
+  stepActive: {
+    background: '#eff6ff',
+    border: '1px solid #bfdbfe',
+  },
+  stepDone: {
+    background: '#f0fdf4',
+  },
+  stepDot: {
+    width: '28px',
+    height: '28px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#3b82f6',
-    color: '#fff',
     borderRadius: '50%',
+    background: '#e5e7eb',
+    color: '#9ca3af',
     fontSize: '12px',
-    fontWeight: '600',
-    flexShrink: 0
+    fontWeight: '700',
+    flexShrink: 0,
+    transition: 'all 0.3s ease',
+  },
+  stepDotActive: {
+    background: '#2563eb',
+    color: '#fff',
+    animation: 'pulse 1.5s ease-in-out infinite',
+  },
+  stepDotDone: {
+    background: '#059669',
+    color: '#fff',
   },
   stepText: {
     fontSize: '14px',
-    color: '#666',
-    fontWeight: '500'
-  }
+    color: '#9ca3af',
+    fontWeight: '500',
+    transition: 'all 0.3s ease',
+  },
+  stepTextActive: {
+    color: '#1e40af',
+    fontWeight: '600',
+  },
+  stepTextDone: {
+    color: '#059669',
+  },
+  // Error state
+  errorIcon: { fontSize: '48px', marginBottom: '16px' },
+  errorTitle: { fontSize: '22px', fontWeight: '700', color: '#111827', margin: '0 0 8px 0' },
+  errorText: { fontSize: '14px', color: '#6b7280', marginBottom: '24px', lineHeight: '1.6' },
+  retryBtn: {
+    width: '100%',
+    padding: '14px',
+    borderRadius: '10px',
+    border: 'none',
+    background: '#2563eb',
+    color: '#fff',
+    fontSize: '15px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    marginBottom: '8px',
+  },
+  backBtn: {
+    width: '100%',
+    padding: '14px',
+    borderRadius: '10px',
+    border: '1px solid #e5e7eb',
+    background: 'transparent',
+    color: '#6b7280',
+    fontSize: '14px',
+    cursor: 'pointer',
+  },
 }

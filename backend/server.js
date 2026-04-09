@@ -1,310 +1,157 @@
-import dotenv from 'dotenv';
-import express from 'express';
-import cors from 'cors';
-import axios from 'axios';
-import multer from 'multer';
-import pdfParse from 'pdf-parse';
-import process from 'process';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-import path from 'path';
+import process from 'node:process'
+import 'dotenv/config'
+import express from 'express'
+import cors from 'cors'
+import formidable from 'formidable'
+import fs from 'node:fs/promises'
+import pdfParse from 'pdf-parse'
+import axios from 'axios'
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const app = express()
+const PORT = process.env.PORT || 3001
 
-// Load env explicitly from the repo root `.env` (don't rely on cwd).
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
-// Optionally allow a `backend/.env` for local overrides.
-dotenv.config({ path: path.resolve(__dirname, '.env'), override: false });
+app.use(cors())
+app.use(express.json({ limit: '5mb' }))
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// ── Qwen model rotation ───────────────────────────
+const QWEN_MODELS = [
+  'qwen-plus',
+  'qwen3.5-122b-a10b',
+  'qvq-max-2025-03-25',
+]
+let qwenModelIndex = 0
 
-async function callGroq(prompt) {
-  if (!process.env.GROQ_API_KEY) {
-    throw new Error('GROQ_API_KEY not configured');
-  }
-  const response = await axios.post(
-    'https://api.groq.com/openai/v1/chat/completions',
-    {
-      model: 'llama-3.1-8b-instant',
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are an expert professional resume writer. Return ONLY valid JSON. No markdown. No backticks. No extra text.',
-        },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.7,
-      max_tokens: 2000,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    }
-  );
-
-  const raw = response.data?.choices?.[0]?.message?.content || '';
-  return raw.replace(/```json|```/g, '').trim();
+function getNextQwenModel() {
+  const model = QWEN_MODELS[qwenModelIndex]
+  qwenModelIndex = (qwenModelIndex + 1) % QWEN_MODELS.length
+  return model
 }
 
-function normalizeAnalyzeResult(result, { trimmedResume }) {
-  // Some models return nested JSON or structured objects; normalize to our UI schema.
-  let r = result
-  if (typeof r === 'string') {
-    try { r = JSON.parse(r) } catch { /* keep string */ }
-  }
+// ── Startup ────────────────────────────────────────
+console.log('')
+console.log('🔑 API Keys loaded:')
+const keyNames = ['JINA_API_KEY', 'QWEN_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY']
+keyNames.forEach(k => {
+  console.log(`  ${k}: ${process.env[k] ? '✓ Loaded' : '✗ Missing'}`)
+})
+console.log('')
+console.log('🤖 LLM Strategy:')
+console.log(`  PRIMARY: Qwen (Rotating: ${QWEN_MODELS.join(', ')})`)
+if (process.env.GEMINI_API_KEY) console.log('  FALLBACK 1: Gemini 2.0 Flash')
+if (process.env.GROQ_API_KEY) console.log('  FALLBACK 2: Groq (Llama 3.3 70B)')
+console.log('')
 
-  // If tailoredResume/coverLetter are JSON-strings, decode them.
-  for (const key of ['tailoredResume', 'coverLetter']) {
-    if (typeof r?.[key] === 'string' && r[key].trim().startsWith('{')) {
-      try { r[key] = JSON.parse(r[key]) } catch { /* ignore */ }
-    }
-  }
-
-  const toText = (v) => {
-    if (typeof v === 'string') return v
-    if (v == null) return ''
-    if (typeof v === 'object') return JSON.stringify(v, null, 2)
-    return String(v)
-  }
-
-  const toArray = (v) => {
-    if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x : toText(x))).filter(Boolean)
-    if (typeof v === 'string') return v.split(',').map((s) => s.trim()).filter(Boolean)
-    return []
-  }
-
-  return {
-    matchScore: Number.isFinite(r?.matchScore) ? r.matchScore : parseInt(r?.matchScore, 10) || 75,
-    matchLabel: typeof r?.matchLabel === 'string' ? r.matchLabel : 'Good Match',
-    matchReason: typeof r?.matchReason === 'string' ? r.matchReason : 'Your experience aligns with key job requirements.',
-    tailoredResume: toText(r?.tailoredResume).slice(0, 4000) || trimmedResume.slice(0, 800),
-    coverLetter: toText(r?.coverLetter).slice(0, 2000),
-    changes: toArray(r?.changes).slice(0, 10),
-    resumeTips: toArray(r?.resumeTips).slice(0, 10),
-  }
-}
-
-// ✅ Verify API Keys are loaded
-console.log('🔑 API Keys loaded:');
-console.log('JINA_API_KEY:', process.env.JINA_API_KEY ? '✓ Loaded' : '✗ Missing');
-console.log('QWEN_API_KEY:', process.env.QWEN_API_KEY ? '✓ Loaded' : '✗ Missing');
-console.log('DASHSCOPE_API_KEY:', process.env.DASHSCOPE_API_KEY ? '✓ Loaded' : '✗ Missing');
-console.log('GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✓ Loaded' : '✗ Missing');
-
-// Simple rate limiter (basic implementation)
-const rateLimit = new Map();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX = 10; // 10 requests per minute
-
-function checkRateLimit(ip) {
-  const now = Date.now();
-  const userRequests = rateLimit.get(ip) || [];
-
-  // Remove old requests outside the window
-  const validRequests = userRequests.filter(time => now - time < RATE_LIMIT_WINDOW);
-
-  if (validRequests.length >= RATE_LIMIT_MAX) {
-    return false; // Rate limit exceeded
-  }
-
-  validRequests.push(now);
-  rateLimit.set(ip, validRequests);
-  return true; // OK to proceed
-}
-
-const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
-
-app.use(cors());
-app.use(express.json());
-
-// Rate limiting middleware
-app.use((req, res, next) => {
-  const ip = req.ip || req.connection.remoteAddress;
-  if (!checkRateLimit(ip)) {
-    return res.status(429).json({ error: 'Too many requests. Please try again later.' });
-  }
-  next();
-});
-
-app.get('/test-groq', async (req, res) => {
-  if (!process.env.GROQ_API_KEY) {
-    return res.status(500).json({ error: 'Groq API key not configured' });
-  }
-
+// ═══════════════════════════════════════════════════
+// POST /upload-resume
+// ═══════════════════════════════════════════════════
+app.post('/upload-resume', async (req, res) => {
   try {
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.1-8b-instant',
-        messages: [{ role: 'user', content: 'Hello, just testing the API. Respond with \"API working\" only.' }],
-        max_tokens: 10,
-        temperature: 0
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 15000
-      }
-    );
+    const form = formidable({ multiples: false, maxFileSize: 10 * 1024 * 1024 })
 
-    res.json({
-      status: 'success',
-      response: response.data.choices?.[0]?.message?.content,
-      usage: response.data.usage
-    });
+    const { files } = await new Promise((resolve, reject) => {
+      form.parse(req, (err, fields, files) => {
+        if (err) return reject(err)
+        resolve({ fields, files })
+      })
+    })
+
+    const file = files?.resume
+    const uploaded = Array.isArray(file) ? file[0] : file
+    if (!uploaded) return res.status(400).json({ error: 'No file uploaded' })
+
+    const name = uploaded.originalFilename || uploaded.newFilename || 'unknown'
+    console.log(`📄 Parsing PDF: ${name} (${uploaded.size} bytes)`)
+
+    if (uploaded.mimetype !== 'application/pdf') {
+      return res.status(400).json({ error: 'Please upload a PDF file' })
+    }
+
+    const buffer = await fs.readFile(uploaded.filepath)
+    const header = buffer.subarray(0, 4).toString('utf8')
+    if (header !== '%PDF') {
+      return res.status(400).json({ error: 'Invalid PDF file' })
+    }
+
+    const data = await pdfParse(buffer)
+    if (!data.text || data.text.trim().length === 0) {
+      return res.status(400).json({ error: 'PDF has no readable text.' })
+    }
+
+    console.log(`✅ PDF parsed, extracted ${data.text.length} characters`)
+    res.json({ resumeText: data.text.slice(0, 5000) })
   } catch (err) {
-    console.error('Groq API Test Error:', err.response?.status, err.response?.data);
+    console.error('❌ Upload error:', err.message)
+    const msg = (err?.message || '').toLowerCase()
     res.status(500).json({
-      error: 'Groq API test failed',
-      detail: err.response?.data || err.message
-    });
+      error: 'Failed to parse PDF',
+      detail: err.message,
+      hint: msg.includes('xref')
+        ? 'Your PDF may be malformed. Try: Print → Save as PDF, then re-upload.'
+        : 'Make sure your PDF contains selectable text.',
+    })
   }
-});
+})
 
-app.get('/test-qwen', async (req, res) => {
-  const qwenKey = process.env.QWEN_API_KEY || process.env.DASHSCOPE_API_KEY;
-  if (!qwenKey) {
-    return res.status(500).json({ error: 'QWEN_API_KEY (or DASHSCOPE_API_KEY) not configured' });
-  }
-
-  const baseUrl = process.env.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
-  const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-
-  try {
-    const response = await axios.post(
-      url,
-      {
-        model: process.env.QWEN_MODEL || 'qwen3.6-plus',
-        messages: [{ role: 'user', content: 'Respond with: QWEN_OK' }],
-        temperature: 0,
-        max_tokens: 20
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${qwenKey}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 15000
-      }
-    );
-
-    res.json({
-      status: 'success',
-      model: process.env.QWEN_MODEL || 'qwen3.6-plus',
-      baseUrl,
-      response: response.data?.choices?.[0]?.message?.content,
-      usage: response.data?.usage
-    });
-  } catch (err) {
-    res.status(500).json({
-      status: 'error',
-      model: process.env.QWEN_MODEL || 'qwen3.6-plus',
-      baseUrl,
-      detail: err.response?.data || err.message
-    });
-  }
-});
-
-// ── Scrape job description from URL ───────
+// ═══════════════════════════════════════════════════
+// POST /scrape
+// ═══════════════════════════════════════════════════
 app.post('/scrape', async (req, res) => {
-  const { url } = req.body;
-  if (!url) return res.status(400).json({ error: 'URL required' });
+  const { url } = req.body
+  if (!url) return res.status(400).json({ error: 'URL required' })
+
+  const jinaKey = process.env.JINA_API_KEY
+  if (!jinaKey) {
+    return res.json({
+      jobText: null,
+      source: 'blocked',
+      message: 'JINA_API_KEY not configured. Please paste the job description.',
+    })
+  }
 
   try {
-    const jinaUrl = `https://r.jina.ai/${url}`;
-    const response = await axios.get(jinaUrl, {
+    console.log(`🔗 Scraping: ${url}`)
+    const response = await axios.get(`https://r.jina.ai/${url}`, {
       headers: {
-        'Authorization': `Bearer ${process.env.JINA_API_KEY}`,
-        'Accept': 'text/plain',
-        'X-Timeout': '10'
+        Authorization: `Bearer ${jinaKey}`,
+        Accept: 'text/plain',
+        'X-Timeout': '10',
       },
-      timeout: 12000
-    });
+      timeout: 12000,
+    })
 
-    const text = response.data;
-
-    const isBlocked = text.includes('CAPTCHA') ||
-                     text.includes('not yet fully loaded') ||
-                     text.includes('404 error') ||
-                     text.length < 300;
+    const text = response.data
+    const isBlocked =
+      text.includes('CAPTCHA') ||
+      text.includes('not yet fully loaded') ||
+      text.includes('404 error') ||
+      text.length < 300
 
     if (!isBlocked) {
-      return res.json({
-        jobText: text.slice(0, 4000),
-        source: 'scraped'
-      });
+      console.log(`✅ Scraped ${text.length} chars`)
+      return res.json({ jobText: text.slice(0, 4000), source: 'scraped' })
     }
 
-    return res.json({
-      jobText: null,
-      source: 'blocked',
-      message: 'This job site blocks scrapers. Please paste the job description instead.'
-    });
-
-  } catch {
-    return res.json({
-      jobText: null,
-      source: 'blocked',
-      message: 'Could not fetch job. Please paste the description instead.'
-    });
-  }
-});
-
-app.post('/upload-resume', upload.single('resume'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  try {
-    console.log('📄 Parsing PDF file:', req.file.originalname, `(${req.file.size} bytes)`);
-    // Basic sanity check: PDF files should start with "%PDF"
-    const header = req.file.buffer?.subarray?.(0, 4)?.toString?.('utf8');
-    if (header !== '%PDF') {
-      return res.status(400).json({
-        error: 'Invalid PDF file',
-        hint: 'This file does not look like a valid PDF. Try re-exporting your resume as a standard PDF.',
-      });
-    }
-
-    const data = await pdfParse(req.file.buffer);
-    
-    if (!data.text || data.text.trim().length === 0) {
-      console.warn('⚠️ PDF has no extractable text');
-      return res.status(400).json({ error: 'PDF has no readable text. Please upload a different file.' });
-    }
-    
-    console.log('✅ PDF parsed successfully, extracted', data.text.length, 'characters');
-    res.json({ resumeText: data.text.slice(0, 5000) });
+    console.log('⚠️ Site appears blocked')
+    res.json({ jobText: null, source: 'blocked', message: 'Site blocks scrapers. Paste description instead.' })
   } catch (err) {
-    console.error('❌ PDF parsing error:', err.message);
-    const msg = (err?.message || '').toLowerCase();
-    const isXref = msg.includes('xref');
-    res.status(500).json({ 
-      error: 'Failed to parse PDF', 
-      detail: err.message,
-      hint: isXref
-        ? 'Your PDF appears to be malformed (XRef table issue). Try: open it and "Print" → "Save as PDF", or export again from Google Docs/Word/Canva. Then re-upload.'
-        : 'Make sure your PDF contains text (not just images). Try converting it or uploading a different resume.'
-    });
+    console.log('⚠️ Scrape failed:', err.message)
+    res.json({ jobText: null, source: 'blocked', message: 'Could not fetch. Paste description instead.' })
   }
-});
+})
 
-// ── AI: tailor resume + cover letter (Gemini) ──
+// ═══════════════════════════════════════════════════
+// POST /analyze
+// ═══════════════════════════════════════════════════
 app.post('/analyze', async (req, res) => {
-  const { resumeText, jobText } = req.body;
-  if (!resumeText || !jobText)
-    return res.status(400).json({ error: 'resumeText and jobText required' });
+  const { resumeText, jobText } = req.body
+  if (!resumeText || !jobText) {
+    return res.status(400).json({ error: 'resumeText and jobText required' })
+  }
 
-  // Trim inputs to avoid token overflow
-  const trimmedResume = resumeText.slice(0, 3000);
-  const trimmedJob = jobText.slice(0, 2000);
+  const trimmedResume = resumeText.slice(0, 3000)
+  const trimmedJob = jobText.slice(0, 2000)
 
-  const prompt = `You are an expert professional resume writer. Your task is to tailor a resume for a specific job.
+  const prompt = `You are an expert professional resume writer. Tailor this resume for the job.
 
 ORIGINAL RESUME:
 ${trimmedResume}
@@ -312,134 +159,209 @@ ${trimmedResume}
 TARGET JOB DESCRIPTION:
 ${trimmedJob}
 
-TASK: Create a professionally tailored version that highlights relevant skills and achievements.
+RULES:
+- Extract real data from the resume — never invent or use placeholders
+- Rewrite bullets to match job keywords and show measurable impact
+- Tailor the summary specifically to this job
+- Cover letter must use candidate's real name and real experience — no placeholders like [Company Name]
+- The "title" field must be a professional headline, NOT the exact job title being applied for
+- Return ONLY valid JSON — no markdown, no backticks, no extra text
 
-CRITICAL REQUIREMENTS:
-1. Return ONLY valid JSON - no markdown, backticks, or extra text
-2. matchScore: 0-100 integer rating how well resume matches the job
-3. matchLabel: "Excellent Match", "Strong Match", "Good Match", or "Fair Match"
-4. matchReason: 1 sentence explaining the match
-5. tailoredResume: Complete professional resume (800-1000 chars) with name, summary, and key sections rewritten to match job requirements. Make it ready-to-use.
-6. changes: Array of 3-5 specific changes made to tailor the resume
-7. coverLetter: Professional cover letter (400-600 chars) ready to send
-8. resumeTips: Array of 3-5 actionable tips for this specific role
-
-Return EXACTLY this JSON structure:
+Return this exact JSON structure:
 {
   "matchScore": 82,
   "matchLabel": "Strong Match",
-  "matchReason": "Your experience directly aligns with the core requirements.",
-  "tailoredResume": "FULL PROFESSIONAL RESUME HERE - Include summary highlighting relevant skills, experience section with accomplishments matching job keywords, skills section tailored to job requirements",
-  "changes": ["Emphasized leadership experience matching job requirements", "Highlighted quantifiable achievements in target technologies", "Reordered experience sections by job relevance", "Added industry-specific keywords from job description", "Strengthened metrics and impact statements"],
-  "coverLetter": "FULL PROFESSIONAL COVER LETTER - Personalized greeting, paragraph explaining fit for role, paragraph showing understanding of company/role, closing with call to action",
-  "resumeTips": ["Use exact keywords from the job description", "Quantify all achievements with metrics", "Lead with most relevant experience", "Highlight team leadership and impact", "Include technologies/tools matching job requirements"]
-}`;
+  "matchReason": "One specific sentence explaining the score.",
+  "changes": [
+    "Specific change 1 made to resume",
+    "Specific change 2 made to resume",
+    "Specific change 3 made to resume"
+  ],
+  "resumeTips": [
+    "Specific actionable tip for this role",
+    "Specific actionable tip for this role",
+    "Specific actionable tip for this role"
+  ],
+  "coverLetter": "Full ready-to-send cover letter using candidate real name and experience. No placeholders whatsoever.",
+  "resume": {
+    "name": "Extracted full name from resume",
+    "title": "Professional headline combining their real expertise with relevance to target role (e.g. 'Certified Project Manager | Agile & Operations Specialist') — never just copy the job title",
+    "email": "Extracted email or empty string",
+    "phone": "Extracted phone or empty string",
+    "location": "Extracted location or empty string",
+    "linkedin": "Extracted LinkedIn URL or empty string",
+    "summary": "2-3 sentence professional summary rewritten to match this job description keywords and requirements",
+    "experience": [
+      {
+        "company": "Real company name from resume",
+        "role": "Real job title from resume",
+        "duration": "Date range from resume",
+        "bullets": [
+          "Rewritten achievement bullet with metrics and job keywords",
+          "Rewritten achievement bullet with metrics and job keywords",
+          "Rewritten achievement bullet with metrics and job keywords"
+        ]
+      }
+    ],
+    "education": [
+      {
+        "institution": "Real institution name",
+        "degree": "Real degree and field",
+        "year": "Graduation year"
+      }
+    ],
+    "skills": ["Skill 1", "Skill 2", "Skill 3", "Skill 4", "Skill 5", "Skill 6", "Skill 7", "Skill 8"]
+  }
+}`
 
-  try {
-    const qwenKey = process.env.QWEN_API_KEY || process.env.DASHSCOPE_API_KEY;
-    if (!qwenKey) {
-      return res.status(500).json({ error: 'QWEN_API_KEY (or DASHSCOPE_API_KEY) not configured' });
-    }
+  const systemMsg = 'You are an expert resume writer. Always return valid JSON only. No markdown, no backticks, no explanation.'
 
-    console.log('📊 Sending analysis request to Qwen API...');
-    const qwenBaseUrl = process.env.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
-    const qwenUrl = `${qwenBaseUrl.replace(/\/$/, '')}/chat/completions`;
-    const qwenPayload = {
-      model: process.env.QWEN_MODEL || 'qwen3.6-plus',
-      messages: [
-        { role: 'system', content: 'Return ONLY valid JSON. No markdown. No backticks. No extra text.' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.7,
-      max_tokens: 2000
-    };
+  let raw = null
+  let usedModel = ''
 
-    // Retry on transient overloads (429/5xx/timeouts).
-    const backoffs = [0, 800, 1600, 2500];
-    let response;
-    let lastErr;
-    for (const wait of backoffs) {
-      if (wait) await sleep(wait);
+  // ── Attempt 1: Qwen (rotate through 3 models) ───
+  if (process.env.QWEN_API_KEY) {
+    // Start from current rotation index
+    const startModel = getNextQwenModel()
+    const startIdx = QWEN_MODELS.indexOf(startModel)
+    const ordered = [
+      ...QWEN_MODELS.slice(startIdx),
+      ...QWEN_MODELS.slice(0, startIdx),
+    ]
+
+    for (const model of ordered) {
+      if (raw) break
       try {
-        response = await axios.post(qwenUrl, qwenPayload, {
-          headers: {
-            Authorization: `Bearer ${qwenKey}`,
-            'Content-Type': 'application/json'
+        console.log(`🤖 Trying Qwen (${model})...`)
+        const r = await axios.post(
+          'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+          {
+            model,
+            messages: [
+              { role: 'system', content: systemMsg },
+              { role: 'user', content: prompt },
+            ],
+            max_tokens: 8000,
+            temperature: 0.7,
           },
-          timeout: 30000
-        });
-        lastErr = null;
-        break;
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 45000,
+          }
+        )
+        raw = r.data.choices[0].message.content
+        usedModel = model
+        console.log(`✅ Qwen (${model}) responded, length: ${raw.length}`)
       } catch (e) {
-        lastErr = e;
-        const status = e?.response?.status;
-        const msg = e?.response?.data?.error?.message || e?.message || '';
-        const isOverload = status === 429 || status === 503 || status >= 500 || msg.toLowerCase().includes('timeout');
-        if (!isOverload) break;
-        console.warn('⚠️ Qwen overloaded, retrying...', { status, msg: msg.slice(0, 120) });
+        console.warn(`⚠️ Qwen (${model}) failed:`, e.response?.data?.message || e.message)
       }
     }
-
-    let raw;
-    if (response) {
-      raw = response.data?.choices?.[0]?.message?.content || '';
-    } else {
-      console.warn('⚠️ Qwen still overloaded; falling back to Groq...');
-      raw = await callGroq(prompt);
-    }
-
-    console.log('📦 Raw response received, length:', raw.length);
-    const clean = raw.replace(/```json|```/g, '').trim();
-
-    try {
-      const result = JSON.parse(clean);
-      const normalized = normalizeAnalyzeResult(result, { trimmedResume });
-      console.log('✅ Successfully parsed AI response');
-      console.log('   - matchScore:', normalized.matchScore);
-      console.log('   - tailoredResume length:', normalized.tailoredResume?.length);
-      console.log('   - coverLetter length:', normalized.coverLetter?.length);
-      res.json(normalized);
-    } catch (parseErr) {
-      console.error('❌ JSON Parse Error:', parseErr.message);
-      console.error('Raw response (first 500 chars):', raw.slice(0, 500));
-
-      // Improved fallback extraction
-      const scoreMatch = raw.match(/"matchScore"\s*:\s*(\d+)/);
-      const labelMatch = raw.match(/"matchLabel"\s*:\s*"([^"]+)"/);
-      const reasonMatch = raw.match(/"matchReason"\s*:\s*"([^"]*?)"/);
-      const tailoredMatch = raw.match(/"tailoredResume"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,/);
-      const coverMatch = raw.match(/"coverLetter"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,/);
-      const changesMatch = raw.match(/"changes"\s*:\s*\[([\s\S]*?)\]/);
-      const tipsMatch = raw.match(/"resumeTips"\s*:\s*\[([\s\S]*?)\]/);
-
-      const extractArray = (str) => {
-        if (!str) return [];
-        return str.split(',').map(s => s.trim().replace(/^"|"$/g, '').slice(0, 200)).filter(s => s.length > 0);
-      };
-
-      const fallback = {
-        matchScore: scoreMatch ? parseInt(scoreMatch[1]) : 75,
-        matchLabel: labelMatch ? labelMatch[1] : 'Good Match',
-        matchReason: reasonMatch ? reasonMatch[1] : 'Your experience aligns with key job requirements.',
-        tailoredResume: tailoredMatch ? tailoredMatch[1].slice(0, 1000) : trimmedResume.slice(0, 800) + '\n\n[Your resume tailored for this role - key keywords and achievements highlighted to match job description]',
-        changes: extractArray(changesMatch ? changesMatch[1] : 'Keywords optimized, Experience reordered, Skills highlighted, Impact statements added, Technical skills emphasized'),
-        coverLetter: coverMatch ? coverMatch[1].slice(0, 600) : 'Dear Hiring Manager,\n\nI am excited to apply for this position. My background in [key skill] and experience with [relevant tech] make me a strong fit. I am confident I can contribute significantly to your team.\n\nBest regards',
-        resumeTips: extractArray(tipsMatch ? tipsMatch[1] : 'Use exact job keywords, Quantify achievements, Lead with relevant experience, Highlight specific technologies, Show impact with metrics')
-      };
-
-      console.log('📋 Using fallback response');
-      res.json(normalizeAnalyzeResult(fallback, { trimmedResume }));
-    }
-  } catch (err) {
-    console.error('❌ Gemini API Error:', err.response?.data || err.message);
-    res.status(500).json({ 
-      error: 'AI analysis failed', 
-      detail: err.response?.data?.error?.message || err.message 
-    });
   }
-});
 
-const PORT = process.env.PORT || 3001;
+  // ── Attempt 2: Gemini ────────────────────────────
+  if (!raw && process.env.GEMINI_API_KEY) {
+    try {
+      console.log('🤖 Trying Gemini...')
+      const r = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          contents: [{ parts: [{ text: `${systemMsg}\n\n${prompt}` }] }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 8000,
+            responseMimeType: 'application/json',
+          },
+        },
+        { timeout: 45000 }
+      )
+      raw = r.data.candidates[0].content.parts[0].text
+      usedModel = 'gemini-2.0-flash'
+      console.log('✅ Gemini responded, length:', raw.length)
+    } catch (e) {
+      console.warn('⚠️ Gemini failed:', e.response?.data?.error?.message || e.message)
+    }
+  }
+
+  // ── Attempt 3: Groq (last resort) ───────────────
+  if (!raw && process.env.GROQ_API_KEY) {
+    try {
+      console.log('🤖 Trying Groq...')
+      const r = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: systemMsg },
+            { role: 'user', content: prompt },
+          ],
+          max_tokens: 8000,
+          temperature: 0.7,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 30000,
+        }
+      )
+      raw = r.data.choices[0].message.content
+      usedModel = 'groq-llama-3.3-70b'
+      console.log('✅ Groq responded, length:', raw.length)
+    } catch (e) {
+      console.warn('⚠️ Groq failed:', e.response?.data?.error?.message || e.message)
+    }
+  }
+
+  // ── All failed ───────────────────────────────────
+  if (!raw) {
+    console.error('❌ All AI models failed')
+    return res.status(500).json({ error: 'All AI models failed. Check API keys.' })
+  }
+
+  // ── Parse JSON ───────────────────────────────────
+  try {
+    const clean = raw.replace(/```json\s?|```/g, '').trim()
+    const result = JSON.parse(clean)
+    console.log(`✅ Parsed via ${usedModel} | score: ${result.matchScore}`)
+    res.json({ ...result, _model: usedModel })
+  } catch (parseErr) {
+    console.error('❌ JSON parse failed:', parseErr.message)
+    console.error('Raw (first 500):', raw.slice(0, 500))
+    const s = (p) => { const m = raw.match(p); return m ? m[1] : null }
+    res.json({
+      matchScore: parseInt(s(/"matchScore"\s*:\s*(\d+)/)) || 70,
+      matchLabel: s(/"matchLabel"\s*:\s*"([^"]+)"/) || 'Good Match',
+      matchReason: s(/"matchReason"\s*:\s*"([^"]+)"/) || 'Your experience aligns with this role.',
+      changes: ['Resume keywords optimized', 'Experience reordered', 'Skills tailored'],
+      resumeTips: ['Quantify achievements', 'Add job keywords', 'Lead with relevant experience'],
+      coverLetter: 'Dear Hiring Manager,\n\nI am excited to apply.\n\nBest regards',
+      resume: {
+        name: s(/"name"\s*:\s*"([^"]+)"/) || 'Your Name',
+        title: '', email: '', phone: '', location: '', linkedin: '',
+        summary: 'Experienced professional with relevant skills.',
+        experience: [], education: [], skills: [],
+      },
+      _model: usedModel,
+      _fallback: true,
+    })
+  }
+})
+
+// ═══════════════════════════════════════════════════
+// GET /health
+// ═══════════════════════════════════════════════════
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+})
+
+// ═══════════════════════════════════════════════════
+// Start
+// ═══════════════════════════════════════════════════
 app.listen(PORT, () => {
-  console.log(`✅ ApplyAI backend running on port ${PORT}`);
-});
+  console.log(`✅ ApplyAI backend running on port ${PORT}`)
+  console.log('')
+})

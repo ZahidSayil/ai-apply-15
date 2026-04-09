@@ -1,8 +1,12 @@
+/* eslint-disable no-unused-vars */
+import process from 'node:process'
 import axios from 'axios'
-import { checkRateLimit, readJson, sendJson, getRequiredEnv } from './_utils.js'
+import { checkRateLimit, readJson, sendJson, setCors } from './_utils.js'
 
 export default async function handler(req, res) {
-  if (!checkRateLimit(req)) return sendJson(res, 429, { error: 'Too many requests. Please try again later.' })
+  setCors(req, res)
+  if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end() }
+  if (!checkRateLimit(req)) return sendJson(res, 429, { error: 'Too many requests' })
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' })
 
   let body
@@ -15,16 +19,33 @@ export default async function handler(req, res) {
   const url = body?.url
   if (!url) return sendJson(res, 400, { error: 'URL required' })
 
+  // Basic URL validation
   try {
-    const jinaKey = getRequiredEnv('JINA_API_KEY')
-    const jinaUrl = `https://r.jina.ai/${url}`
-    const response = await axios.get(jinaUrl, {
+    const parsed = new URL(url)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return sendJson(res, 400, { error: 'Invalid URL. Must start with http:// or https://' })
+    }
+  } catch {
+    return sendJson(res, 400, { error: 'Invalid URL format' })
+  }
+
+  const jinaKey = process.env.JINA_API_KEY
+  if (!jinaKey) {
+    return sendJson(res, 200, {
+      jobText: null,
+      source: 'blocked',
+      message: 'URL scraping not available. Please paste the job description instead.',
+    })
+  }
+
+  try {
+    const response = await axios.get(`https://r.jina.ai/${url}`, {
       headers: {
         Authorization: `Bearer ${jinaKey}`,
         Accept: 'text/plain',
         'X-Timeout': '10',
       },
-      timeout: 12_000,
+      timeout: 12000,
     })
 
     const text = response.data
@@ -44,13 +65,10 @@ export default async function handler(req, res) {
       message: 'This job site blocks scrapers. Please paste the job description instead.',
     })
   } catch (err) {
-    // Treat failures as "blocked" so the UI can fall back to paste mode.
     return sendJson(res, 200, {
       jobText: null,
       source: 'blocked',
       message: 'Could not fetch job. Please paste the description instead.',
-      detail: err?.message,
     })
   }
 }
-

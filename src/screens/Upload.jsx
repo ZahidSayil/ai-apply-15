@@ -6,29 +6,36 @@ export default function Upload() {
   const [dragging, setDragging] = useState(false)
   const [loading, setLoading] = useState(false)
   const [fileName, setFileName] = useState('')
+  const [error, setError] = useState('')
   const navigate = useNavigate()
 
   async function handleFile(file) {
-    if (!file || file.type !== 'application/pdf') {
-      alert('Please upload a PDF file')
+    if (!file) return
+    if (file.type !== 'application/pdf') {
+      setError('Please upload a PDF file')
       return
     }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File too large. Maximum 10MB.')
+      return
+    }
+
+    setError('')
     setLoading(true)
     setFileName(file.name)
+
     const formData = new FormData()
     formData.append('resume', file)
+
     try {
-      const res = await axios.post('/api/upload-resume', formData)
+      const res = await axios.post('/api/upload-resume', formData, { timeout: 30000 })
       localStorage.setItem('resumeText', res.data.resumeText)
       localStorage.setItem('resumeFileName', file.name)
       navigate('/job')
     } catch (err) {
-      const msg =
-        err?.response?.data?.error ||
-        err?.response?.data?.detail ||
-        err?.message ||
-        'Upload failed'
-      alert(`${msg}\n\nIf you are running locally, use "npm run dev:all" so /api is available.`)
+      const msg = err?.response?.data?.error || err?.message || 'Upload failed'
+      const hint = err?.response?.data?.hint || ''
+      setError(`${msg}${hint ? '\n' + hint : ''}`)
       setLoading(false)
     }
   }
@@ -36,17 +43,29 @@ export default function Upload() {
   return (
     <div style={styles.page}>
       <div style={styles.container}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>Land your dream job</h1>
-          <p style={styles.subtitle}>Upload your resume to get started</p>
+        {/* Brand */}
+        <div style={styles.brand}>
+          apply<span style={styles.brandAccent}>ai</span>
         </div>
 
+        <div style={styles.header}>
+          <h1 style={styles.title}>Land your dream job</h1>
+          <p style={styles.subtitle}>Upload your resume and we'll tailor it for any position</p>
+        </div>
+
+        {error && (
+          <div style={styles.errorBox}>
+            <span style={styles.errorIcon}>⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
+
         <div
-          style={{ ...styles.uploadArea, ...(dragging ? styles.uploadAreaActive : {}) }}
+          style={{ ...styles.uploadArea, ...(dragging ? styles.uploadAreaActive : {}), ...(loading ? styles.uploadAreaLoading : {}) }}
           onDragOver={e => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
           onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
-          onClick={() => document.getElementById('fileInput').click()}
+          onClick={() => !loading && document.getElementById('fileInput').click()}
         >
           <input
             id="fileInput"
@@ -56,119 +75,173 @@ export default function Upload() {
             style={{ display: 'none' }}
           />
           {loading ? (
-            <div>
-              <p style={styles.loadingText}>Parsing {fileName}...</p>
+            <div style={styles.loadingContent}>
               <div style={styles.spinner} />
+              <p style={styles.loadingText}>Parsing {fileName}...</p>
             </div>
           ) : (
             <div style={styles.uploadContent}>
-              <p style={styles.uploadIcon}>📄</p>
+              <div style={styles.uploadIconCircle}>📄</div>
               <p style={styles.uploadText}>Drop your resume here</p>
-              <p style={styles.uploadSubtext}>or click to browse (PDF only)</p>
+              <p style={styles.uploadSubtext}>or click to browse · PDF only · Max 10MB</p>
             </div>
           )}
         </div>
 
-        <p style={styles.privacy}>Your resume stays private. Never stored on our servers.</p>
+        <div style={styles.features}>
+          {['AI-powered tailoring', 'Match scoring', 'Cover letter generation'].map((f, i) => (
+            <div key={i} style={styles.feature}>
+              <span style={styles.featureCheck}>✓</span>
+              <span style={styles.featureText}>{f}</span>
+            </div>
+          ))}
+        </div>
+
+        <p style={styles.privacy}>🔒 Your resume stays private. Processed in memory, never stored.</p>
       </div>
     </div>
   )
 }
 
 const styles = {
-  page: { 
-    minHeight: '100vh', 
-    background: '#fff',
-    display: 'flex', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
+  page: {
+    minHeight: '100vh',
+    background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 50%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: '20px',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
   },
-  container: { 
-    width: '100%', 
-    maxWidth: '500px'
+  container: {
+    width: '100%',
+    maxWidth: '480px',
+    animation: 'fadeIn 0.4s ease',
   },
-  header: { 
-    marginBottom: '40px', 
-    textAlign: 'center'
+  brand: {
+    textAlign: 'center',
+    fontSize: '24px',
+    fontWeight: '800',
+    color: '#111827',
+    letterSpacing: '-1px',
+    marginBottom: '32px',
   },
-  title: { 
-    fontSize: '32px', 
-    fontWeight: '700', 
-    color: '#1a1a1a', 
-    margin: '0 0 12px 0',
-    lineHeight: '1.2'
+  brandAccent: { color: '#2563eb' },
+  header: {
+    marginBottom: '32px',
+    textAlign: 'center',
   },
-  subtitle: { 
-    fontSize: '16px', 
-    color: '#666', 
-    margin: '0'
+  title: {
+    fontSize: '34px',
+    fontWeight: '800',
+    color: '#111827',
+    margin: '0 0 10px 0',
+    lineHeight: '1.15',
+    letterSpacing: '-0.5px',
   },
-  uploadArea: { 
-    border: '2px dashed #e0e0e0', 
-    borderRadius: '12px', 
-    padding: '60px 20px', 
-    cursor: 'pointer', 
-    transition: 'all 0.3s ease',
-    marginBottom: '24px', 
-    background: '#f9f9f9',
-    textAlign: 'center'
+  subtitle: {
+    fontSize: '16px',
+    color: '#6b7280',
+    margin: '0',
+    lineHeight: '1.5',
   },
-  uploadAreaActive: { 
-    borderColor: '#3b82f6', 
+  errorBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '12px 16px',
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    borderRadius: '10px',
+    marginBottom: '16px',
+    fontSize: '14px',
+    color: '#991b1b',
+  },
+  errorIcon: { fontSize: '16px', flexShrink: 0 },
+  uploadArea: {
+    border: '2px dashed #d1d5db',
+    borderRadius: '16px',
+    padding: '48px 20px',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    marginBottom: '24px',
+    background: '#ffffff',
+    textAlign: 'center',
+  },
+  uploadAreaActive: {
+    borderColor: '#2563eb',
     background: '#eff6ff',
-    borderWidth: '2px'
   },
-  uploadContent: { 
+  uploadAreaLoading: {
+    cursor: 'default',
+    borderColor: '#93c5fd',
+    background: '#f0f7ff',
+  },
+  uploadContent: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: '8px'
+    gap: '8px',
   },
-  uploadIcon: { 
-    fontSize: '48px', 
-    margin: '0'
+  uploadIconCircle: {
+    fontSize: '42px',
+    marginBottom: '4px',
   },
-  uploadText: { 
-    fontSize: '16px', 
-    fontWeight: '600', 
-    color: '#1a1a1a',
-    margin: '0'
-  },
-  uploadSubtext: { 
-    fontSize: '14px', 
-    color: '#999',
-    margin: '0'
-  },
-  loadingText: {
+  uploadText: {
     fontSize: '16px',
-    color: '#666',
-    margin: '0 0 16px 0',
-    fontWeight: '500'
+    fontWeight: '600',
+    color: '#111827',
+    margin: '0',
+  },
+  uploadSubtext: {
+    fontSize: '13px',
+    color: '#9ca3af',
+    margin: '0',
+  },
+  loadingContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '16px',
   },
   spinner: {
-    width: '40px',
-    height: '40px',
-    border: '3px solid #f0f0f0',
-    borderTop: '3px solid #3b82f6',
+    width: '36px',
+    height: '36px',
+    border: '3px solid #e5e7eb',
+    borderTop: '3px solid #2563eb',
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
-    margin: '0 auto'
   },
-  privacy: { 
-    fontSize: '13px', 
-    color: '#999',
+  loadingText: {
+    fontSize: '15px',
+    color: '#6b7280',
     margin: '0',
-    textAlign: 'center'
-  }
+    fontWeight: '500',
+  },
+  features: {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '20px',
+    marginBottom: '24px',
+    flexWrap: 'wrap',
+  },
+  feature: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  featureCheck: {
+    color: '#059669',
+    fontWeight: '700',
+    fontSize: '14px',
+  },
+  featureText: {
+    fontSize: '13px',
+    color: '#6b7280',
+  },
+  privacy: {
+    fontSize: '12px',
+    color: '#9ca3af',
+    margin: '0',
+    textAlign: 'center',
+  },
 }
-
-// Add spin animation
-const styleSheet = document.createElement('style')
-styleSheet.textContent = `
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-`
-document.head.appendChild(styleSheet)
