@@ -8,9 +8,18 @@ export default function JobInput() {
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState('url')
   const [error, setError] = useState('')
+  const [includeCoverLetter, setIncludeCoverLetter] = useState(false)
+  const [depthMode, setDepthMode] = useState('concise')
   const navigate = useNavigate()
 
   const resumeName = localStorage.getItem('resumeFileName') || 'your resume'
+
+  function persistAnalysisOptions() {
+    localStorage.setItem('analysisOptions', JSON.stringify({
+      includeCoverLetter,
+      depthMode,
+    }))
+  }
 
   async function handleScrape() {
     if (!url.trim()) return setError('Please paste a job URL first')
@@ -21,6 +30,7 @@ export default function JobInput() {
       const res = await axios.post('/api/scrape', { url }, { timeout: 15000 })
 
       if (res.data.jobText) {
+        persistAnalysisOptions()
         localStorage.setItem('jobText', res.data.jobText)
         localStorage.setItem('jobUrl', url)
         navigate('/loading')
@@ -40,6 +50,7 @@ export default function JobInput() {
   function handlePastedText() {
     if (jobText.trim().length < 50) return setError('Please paste at least 50 characters of the job description')
     setError('')
+    persistAnalysisOptions()
     localStorage.setItem('jobText', jobText.trim())
     navigate('/loading')
   }
@@ -128,6 +139,39 @@ export default function JobInput() {
             </button>
           </div>
         )}
+
+        <div style={styles.settingsCard}>
+          <p style={styles.settingsTitle}>Analysis settings</p>
+          <p style={styles.settingsHint}>
+            Expert mode: preserves employers, dates, education, certifications, and languages; rewrites for the job without shrinking your history.
+          </p>
+
+          <label style={styles.toggleRow}>
+            <input
+              type="checkbox"
+              checked={includeCoverLetter}
+              onChange={e => setIncludeCoverLetter(e.target.checked)}
+            />
+            <span>Generate cover letter (uses more tokens)</span>
+          </label>
+
+          <div style={styles.modeWrap}>
+            <button
+              type="button"
+              style={{ ...styles.modeBtn, ...(depthMode === 'concise' ? styles.modeBtnActive : {}) }}
+              onClick={() => setDepthMode('concise')}
+            >
+              Fast & concise
+            </button>
+            <button
+              type="button"
+              style={{ ...styles.modeBtn, ...(depthMode === 'detailed' ? styles.modeBtnActive : {}) }}
+              onClick={() => setDepthMode('detailed')}
+            >
+              Detailed
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -269,5 +313,52 @@ const styles = {
     color: '#9ca3af',
     marginTop: '12px',
     textAlign: 'center',
+  },
+  settingsCard: {
+    marginTop: '20px',
+    border: '1px solid #e5e7eb',
+    borderRadius: '10px',
+    padding: '12px 14px',
+    background: '#fff',
+  },
+  settingsTitle: {
+    margin: '0 0 10px 0',
+    fontSize: '13px',
+    color: '#4b5563',
+    fontWeight: '700',
+  },
+  settingsHint: {
+    margin: '0 0 12px 0',
+    fontSize: '12px',
+    color: '#6b7280',
+    lineHeight: 1.5,
+  },
+  toggleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '13px',
+    color: '#374151',
+    marginBottom: '10px',
+  },
+  modeWrap: {
+    display: 'flex',
+    gap: '8px',
+  },
+  modeBtn: {
+    flex: 1,
+    border: '1px solid #d1d5db',
+    background: '#fff',
+    borderRadius: '8px',
+    fontSize: '12px',
+    fontWeight: '600',
+    padding: '8px 10px',
+    color: '#6b7280',
+    cursor: 'pointer',
+  },
+  modeBtnActive: {
+    background: '#eff6ff',
+    borderColor: '#93c5fd',
+    color: '#1d4ed8',
   },
 }

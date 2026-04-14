@@ -1,6 +1,16 @@
 import { useNavigate } from 'react-router-dom'
 import { useState, useRef } from 'react'
 
+/** API + older cached runs may store 0.8 for "80%". Always show 0–100 for display. */
+function matchScorePercent(raw) {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return 70
+  if (n > 0 && n <= 1) return Math.min(100, Math.round(n * 100))
+  if (n > 1 && n <= 100) return Math.round(n)
+  if (n > 100) return 100
+  return 0
+}
+
 export default function Results() {
   const navigate = useNavigate()
   const resumeRef = useRef()
@@ -16,14 +26,27 @@ export default function Results() {
 
   const data = JSON.parse(raw)
   const r = data.resume || {}
+  const education = Array.isArray(r.education) ? r.education : []
+  const certifications = Array.isArray(r.certifications) ? r.certifications : []
+  const licenses = Array.isArray(r.licenses) ? r.licenses : []
+  const trainings = Array.isArray(r.trainings) ? r.trainings : []
+  const languages = Array.isArray(r.languages) ? r.languages : []
+  const hasCoverLetter = Boolean(data.coverLetter && data.coverLetter.trim())
+  const missingKeywords = data.keywordGaps?.missingKeywords || []
+  const matchedKeywords = data.keywordGaps?.matchedKeywords || []
+  const priorityActions = data.keywordGaps?.priorityActions || []
+  const hasAtsContent =
+    missingKeywords.length + matchedKeywords.length + priorityActions.length > 0
+
+  const matchPct = matchScorePercent(data.matchScore)
 
   const scoreColor =
-    data.matchScore >= 75 ? '#059669' :
-    data.matchScore >= 50 ? '#d97706' : '#dc2626'
+    matchPct >= 75 ? '#059669' :
+    matchPct >= 50 ? '#d97706' : '#dc2626'
 
   const scoreBg =
-    data.matchScore >= 75 ? '#f0fdf4' :
-    data.matchScore >= 50 ? '#fffbeb' : '#fef2f2'
+    matchPct >= 75 ? '#f0fdf4' :
+    matchPct >= 50 ? '#fffbeb' : '#fef2f2'
 
   async function downloadPDF() {
     setDownloading(true)
@@ -53,12 +76,16 @@ export default function Results() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const hasExpertNotes = Boolean(data.expertAgentNotes && data.expertAgentNotes.trim())
+
   const tabs = [
     { id: 'resume', label: '📄 Resume', count: null },
-    { id: 'cover', label: '✉️ Cover Letter', count: null },
+    { id: 'cover', label: '✉️ Cover Letter', count: null, hidden: !hasCoverLetter },
+    { id: 'ats', label: '🎯 ATS Gaps', count: data.keywordGaps?.missingKeywords?.length || 0 },
     { id: 'changes', label: '🔄 Changes', count: data.changes?.length },
     { id: 'tips', label: '💡 Tips', count: data.resumeTips?.length },
-  ]
+    { id: 'expert', label: '🧠 Expert', count: null, hidden: !hasExpertNotes },
+  ].filter(t => !t.hidden)
 
   return (
     <div style={styles.page}>
@@ -78,7 +105,7 @@ export default function Results() {
         {/* Score Card */}
         <div style={{ ...styles.scoreCard, background: scoreBg }}>
           <div style={styles.scoreLeft}>
-            <div style={{ ...styles.scoreBig, color: scoreColor }}>{data.matchScore}%</div>
+            <div style={{ ...styles.scoreBig, color: scoreColor }}>{matchPct}%</div>
             <div style={{ ...styles.scoreLabel, color: scoreColor }}>{data.matchLabel}</div>
           </div>
           <div style={styles.scoreRight}>
@@ -159,12 +186,14 @@ export default function Results() {
                 </div>
               )}
 
-              {/* Education */}
-              {r.education?.length > 0 && (
-                <div style={styles.rSection}>
-                  <div style={styles.rSectionTitle}>Education</div>
-                  <div style={styles.rDivider} />
-                  {r.education.map((edu, i) => (
+              {/* Education — always show so gaps are visible */}
+              <div style={styles.rSection}>
+                <div style={styles.rSectionTitle}>Education</div>
+                <div style={styles.rDivider} />
+                {education.length === 0 ? (
+                  <p style={styles.sectionEmpty}>No education entries found in the source resume.</p>
+                ) : (
+                  education.map((edu, i) => (
                     <div key={i} style={styles.rBlock}>
                       <div style={styles.rBlockHead}>
                         <div>
@@ -174,7 +203,52 @@ export default function Results() {
                         <div style={styles.rDuration}>{edu.year}</div>
                       </div>
                     </div>
-                  ))}
+                  ))
+                )}
+              </div>
+
+              {/* Certifications — compact list */}
+              {certifications.length > 0 && (
+                <div style={styles.rSection}>
+                  <div style={styles.rSectionTitle}>Certifications</div>
+                  <div style={styles.rDivider} />
+                  <ul style={styles.rCompactList}>
+                    {certifications.map((cert, i) => (
+                      <li key={i} style={styles.rCompactItem}>
+                        {cert.name}{cert.issuer ? ` — ${cert.issuer}` : ''}{cert.year ? ` (${cert.year})` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Licenses — compact list */}
+              {licenses.length > 0 && (
+                <div style={styles.rSection}>
+                  <div style={styles.rSectionTitle}>Licenses</div>
+                  <div style={styles.rDivider} />
+                  <ul style={styles.rCompactList}>
+                    {licenses.map((row, i) => (
+                      <li key={i} style={styles.rCompactItem}>
+                        {row.name}{row.issuer ? ` — ${row.issuer}` : ''}{row.year ? ` (${row.year})` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Trainings — compact list */}
+              {trainings.length > 0 && (
+                <div style={styles.rSection}>
+                  <div style={styles.rSectionTitle}>Trainings & workshops</div>
+                  <div style={styles.rDivider} />
+                  <ul style={styles.rCompactList}>
+                    {trainings.map((row, i) => (
+                      <li key={i} style={styles.rCompactItem}>
+                        {row.name}{row.issuer ? ` — ${row.issuer}` : ''}{row.year ? ` (${row.year})` : ''}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
@@ -190,6 +264,34 @@ export default function Results() {
                   </div>
                 </div>
               )}
+
+              {/* Languages */}
+              <div style={styles.rSection}>
+                <div style={styles.rSectionTitle}>Languages</div>
+                <div style={styles.rDivider} />
+                {languages.length === 0 ? (
+                  <p style={styles.sectionEmpty}>No languages found in the source resume.</p>
+                ) : (
+                  <div style={styles.rSkills}>
+                    {languages.map((lang, i) => (
+                      <span key={i} style={styles.rSkill}>{lang}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Computer / tools */}
+              {r.computerSkills?.length > 0 && (
+                <div style={styles.rSection}>
+                  <div style={styles.rSectionTitle}>Computer & tools</div>
+                  <div style={styles.rDivider} />
+                  <div style={styles.rSkills}>
+                    {r.computerSkills.map((s, i) => (
+                      <span key={i} style={styles.rSkill}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -200,9 +302,69 @@ export default function Results() {
             <button style={styles.actionBtn} onClick={copyLetter}>
               {copied ? '✅ Copied to clipboard!' : '📋 Copy Cover Letter'}
             </button>
+            {data.outreachMessage && (
+              <div style={{ ...styles.letterDoc, marginBottom: '12px' }}>
+                <p style={styles.tabIntro}>Short outreach version:</p>
+                <p style={styles.letterText}>{data.outreachMessage}</p>
+              </div>
+            )}
             <div style={styles.letterDoc}>
               <p style={styles.letterText}>{data.coverLetter}</p>
             </div>
+          </div>
+        )}
+
+        {/* ─── ATS Gap Tab ─── */}
+        {activeTab === 'ats' && (
+          <div style={styles.tabContent}>
+            {!hasAtsContent ? (
+              <div style={styles.atsEmptyBox}>
+                <p style={styles.tabIntro}>No keyword analysis was returned (empty keywordGaps).</p>
+                <p style={styles.sectionEmpty}>Try: paste the <strong>full</strong> job description (not URL-only if scraping fails), enable <strong>Detailed</strong> on the job step, then run analysis again.</p>
+              </div>
+            ) : (
+              <>
+                {missingKeywords.length > 0 ? (
+                  <p style={styles.tabIntro}>Focus these missing keywords in your resume:</p>
+                ) : (
+                  <p style={styles.tabIntro}>
+                    Great alignment. No major missing keywords stood out compared to this job description.
+                  </p>
+                )}
+                {missingKeywords.map((k, i) => (
+                  <div key={i} style={styles.listItem}>
+                    <span style={styles.listIcon}>!</span>
+                    <span style={styles.listText}>{k}</span>
+                  </div>
+                ))}
+
+                {matchedKeywords.length > 0 && (
+                  <>
+                    <p style={{ ...styles.tabIntro, marginTop: missingKeywords.length > 0 ? '14px' : '0' }}>
+                      Keywords already reflected in your tailored resume:
+                    </p>
+                    {matchedKeywords.map((k, i) => (
+                      <div key={`m-${i}`} style={styles.listItem}>
+                        <span style={{ ...styles.listIcon, color: '#059669' }}>✓</span>
+                        <span style={styles.listText}>{k}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {priorityActions.length > 0 && (
+                  <>
+                    <p style={{ ...styles.tabIntro, marginTop: '14px' }}>Priority actions:</p>
+                    {priorityActions.map((a, i) => (
+                      <div key={i} style={styles.listItem}>
+                        <span style={styles.listIcon}>{i + 1}.</span>
+                        <span style={styles.listText}>{a}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
           </div>
         )}
 
@@ -238,13 +400,23 @@ export default function Results() {
           </div>
         )}
 
+        {/* ─── Expert agent notes ─── */}
+        {activeTab === 'expert' && hasExpertNotes && (
+          <div style={styles.tabContent}>
+            <p style={styles.tabIntro}>How the expert agent tailored your resume (transparency):</p>
+            <div style={styles.expertBox}>
+              <p style={styles.expertText}>{data.expertAgentNotes}</p>
+            </div>
+          </div>
+        )}
+
         {/* Footer actions */}
         <div style={styles.footer}>
           <button style={styles.startOverBtn} onClick={() => { localStorage.clear(); navigate('/') }}>
             Start over with new resume
           </button>
           {data._model && (
-            <p style={styles.modelTag}>Powered by {data._model}</p>
+            <p style={styles.modelTag}>Expert resume agent · {data._model}</p>
           )}
         </div>
       </div>
@@ -457,6 +629,8 @@ const styles = {
   rDuration: { fontSize: '12px', color: '#9ca3af', whiteSpace: 'nowrap', marginLeft: '12px' },
   rBullets: { paddingLeft: '16px', margin: 0 },
   rBullet: { fontSize: '13px', color: '#374151', lineHeight: 1.6, marginBottom: '3px' },
+  rCompactList: { paddingLeft: '16px', margin: 0, listStyle: 'disc' },
+  rCompactItem: { fontSize: '12px', color: '#374151', lineHeight: 1.7, marginBottom: '2px' },
   rSkills: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
   rSkill: {
     padding: '5px 14px',
@@ -504,6 +678,18 @@ const styles = {
     color: '#374151',
     lineHeight: 1.6,
   },
+  sectionEmpty: {
+    fontSize: '13px',
+    color: '#6b7280',
+    lineHeight: 1.6,
+    margin: '0 0 4px 0',
+  },
+  atsEmptyBox: {
+    background: '#fefce8',
+    border: '1px solid #fde047',
+    borderRadius: '12px',
+    padding: '16px',
+  },
   emptyText: {
     fontSize: '14px',
     color: '#9ca3af',
@@ -531,5 +717,18 @@ const styles = {
     fontSize: '11px',
     color: '#d1d5db',
     marginTop: '12px',
+  },
+  expertBox: {
+    background: '#ffffff',
+    border: '1px solid #e5e7eb',
+    borderRadius: '12px',
+    padding: '16px',
+  },
+  expertText: {
+    fontSize: '13px',
+    color: '#374151',
+    lineHeight: 1.7,
+    margin: 0,
+    whiteSpace: 'pre-wrap',
   },
 }

@@ -7,7 +7,7 @@ const STEPS = [
   { label: 'Analyzing job requirements', duration: 3000 },
   { label: 'Matching skills & experience', duration: 4000 },
   { label: 'Tailoring your resume', duration: 5000 },
-  { label: 'Writing cover letter', duration: 6000 },
+  { label: 'Generating final output', duration: 6000 },
 ]
 
 export default function Loading() {
@@ -32,6 +32,8 @@ export default function Loading() {
     async function run() {
       const resumeText = localStorage.getItem('resumeText')
       const jobText = localStorage.getItem('jobText')
+      const optionsRaw = localStorage.getItem('analysisOptions')
+      const options = optionsRaw ? JSON.parse(optionsRaw) : { includeCoverLetter: false, depthMode: 'concise' }
 
       if (!resumeText || !jobText) {
         navigate('/')
@@ -41,7 +43,7 @@ export default function Loading() {
       try {
         const res = await axios.post(
           '/api/analyze',
-          { resumeText, jobText },
+          { resumeText, jobText, options },
           { timeout: 60000 } // 60s timeout for AI
         )
         localStorage.setItem('results', JSON.stringify(res.data))

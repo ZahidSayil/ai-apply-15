@@ -53,7 +53,11 @@ export default async function handler(req, res) {
     // Clean up temp file
     try { await fs.unlink(uploaded.filepath) } catch { /* ignore */ }
 
-    return sendJson(res, 200, { resumeText: data.text.slice(0, 5000) })
+    const maxChars = Math.min(
+      Number(process.env.UPLOAD_RESUME_MAX_CHARS) || 60000,
+      80000
+    )
+    return sendJson(res, 200, { resumeText: data.text.slice(0, maxChars) })
   } catch (err) {
     const msg = (err?.message || '').toLowerCase()
     return sendJson(res, 500, {
