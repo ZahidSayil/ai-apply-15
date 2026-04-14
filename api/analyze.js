@@ -383,10 +383,6 @@ function normalizeResult(parsed, { includeCoverLetter }) {
     matchScore: normalizeMatchScore(parsed?.matchScore),
     matchLabel: typeof parsed?.matchLabel === 'string' ? parsed.matchLabel : 'Good Match',
     matchReason: typeof parsed?.matchReason === 'string' ? parsed.matchReason : 'Your profile aligns with the role with room for targeted improvements.',
-    changes: asStringArray(parsed?.changes, ['Resume optimized for role relevance', 'Keywords aligned with job requirements', 'Experience bullets rewritten for impact']),
-    resumeTips: asStringArray(parsed?.resumeTips, ['Quantify outcomes with numbers', 'Mirror role-specific keywords naturally', 'Lead each bullet with a strong action verb']),
-    outreachMessage: typeof parsed?.outreachMessage === 'string' ? parsed.outreachMessage : '',
-    expertAgentNotes: typeof parsed?.expertAgentNotes === 'string' ? parsed.expertAgentNotes : '',
     coverLetter: includeCoverLetter && typeof parsed?.coverLetter === 'string'
       ? parsed.coverLetter
       : '',
@@ -423,12 +419,9 @@ function normalizeResult(parsed, { includeCoverLetter }) {
 
 function buildPrompt({ trimmedResume, trimmedJob, includeCoverLetter, depthMode }) {
   const detailed = depthMode === 'detailed'
-  const arrayLimits = detailed
-    ? 'changes<=8,resumeTips<=8,keyword lists<=15 each,expertAgentNotes<=4 sentences'
-    : 'changes<=5,resumeTips<=5,keyword lists<=10 each,expertAgentNotes<=2 sentences,outreach<=6 lines'
-  const modeInstruction = detailed
-    ? `Richer bullets; no filler. ${arrayLimits}`
-    : `Tight bullets; keep every role/fact. ${arrayLimits}`
+  const modeNote = detailed
+    ? 'Detailed mode: richer bullets, up to 6 per role.'
+    : 'Concise mode: tight bullets, 3-5 per role, keep every role/fact.'
 
   return `ATS resume editor (NGO/edu/health/M&E). ONE JSON only. No invented facts.
 
@@ -438,35 +431,30 @@ ${trimmedResume}
 JOB:
 ${trimmedJob}
 
-TOKEN BUDGET PRIORITY (spend output tokens in this order):
-1. EXPERIENCE (60% of effort) — this is the MOST important section. Every job MUST have 3-6 strong bullets. Rewrite bullets to match JOB keywords, quantify impact, use action verbs. Never return experience with empty or missing bullets.
-2. SUMMARY (10%) — 2-3 sentences tailored to this specific job, using JOB terminology.
-3. SKILLS + keywordGaps (10%) — domain skills from source, matched to JOB.
-4. CREDENTIALS (10%) — education, certs, trainings, languages. Keep only items RELEVANT to the JOB. Do not dump every training from the CV.
-5. OTHER (10%) — changes, tips, cover letter.
+TOKEN BUDGET — spend 70% on EXPERIENCE, 30% on everything else:
 
-EXPERIENCE RULES:
+EXPERIENCE (highest priority):
 - Each distinct job in RESUME → one experience entry with company, role, duration, bullets[]
 - MINIMUM 3 bullets per job, up to 6 for the most relevant roles
-- Bullets must be specific: action verb + what + measurable result/scope
-- Tailor bullets to match JOB requirements (PSS, protection, M&E, health, etc.)
+- Bullets: action verb + what + measurable result/scope, tailored to JOB keywords
 - company = organization name, role = position title — never the same text in both
-- No fake employers/dates
+- No fake employers/dates. ${modeNote}
 
-CREDENTIALS (only include what exists in RESUME):
-- education[]: {degree,institution,year} — formal degrees/diplomas only
-- certifications[]: {name,issuer,year} — max 5, prioritize those relevant to JOB
+SUMMARY: 2-3 sentences tailored to this JOB using its terminology.
+
+CREDENTIALS (only from RESUME, only JOB-relevant):
+- education[]: {degree,institution,year}
+- certifications[]: {name,issuer,year} — max 5 most relevant
+- trainings[]: {name,issuer,year} — max 6 most relevant
 - licenses[]: {name,issuer,year} or []
-- trainings[]: {name,issuer,year} — max 6, ONLY the most relevant to JOB. Do not list all 20 trainings from the CV.
-- languages[]: one string per language with proficiency if available
-- computerSkills[]: from source resume
+- languages[]: one string per language with proficiency
+- computerSkills[]: from source
 
-keywordGaps (never all-empty): matchedKeywords>=4; missingKeywords>=3 JD terms weak/absent; priorityActions>=3 concrete fixes.
+keywordGaps: matchedKeywords>=4, missingKeywords>=3, priorityActions>=3.
+matchScore=int 0-100.
+${includeCoverLetter ? 'coverLetter: <=180 words, facts only.' : 'coverLetter: ""'}
 
-matchScore=int 0-100. ${modeInstruction}
-${includeCoverLetter ? 'coverLetter<=180 words,facts only.' : 'coverLetter:""'}
-
-Keys: matchScore,matchLabel,matchReason,changes,resumeTips,outreachMessage,expertAgentNotes,coverLetter,keywordGaps,resume{name,title,email,phone,location,linkedin,summary,experience[],education[],certifications[],licenses[],trainings[],skills[],languages[],computerSkills[]}`
+JSON keys: matchScore,matchLabel,matchReason,coverLetter,keywordGaps{missingKeywords,matchedKeywords,priorityActions},resume{name,title,email,phone,location,linkedin,summary,experience[],education[],certifications[],licenses[],trainings[],skills[],languages[],computerSkills[]}`
 }
 
 const SYSTEM_MSG = 'Return one valid JSON object only. No markdown. Obey employer vs job title: company=organization name, role=position title—never duplicate the same text in both.'

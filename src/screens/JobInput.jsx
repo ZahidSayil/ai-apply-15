@@ -58,9 +58,12 @@ export default function JobInput() {
   return (
     <div style={styles.page}>
       <div style={styles.container}>
-        <button style={styles.backBtn} onClick={() => navigate('/')}>
-          ← Back
-        </button>
+        <div style={styles.topRow}>
+          <button style={styles.backBtn} onClick={() => navigate('/')}>
+            ← Back
+          </button>
+          <div style={styles.brand}>CV<span style={styles.brandAccent}>ibe</span></div>
+        </div>
 
         <div style={styles.header}>
           <h1 style={styles.title}>Enter job details</h1>
@@ -143,7 +146,7 @@ export default function JobInput() {
         <div style={styles.settingsCard}>
           <p style={styles.settingsTitle}>Analysis settings</p>
           <p style={styles.settingsHint}>
-            Expert mode: preserves employers, dates, education, certifications, and languages; rewrites for the job without shrinking your history.
+            Detailed mode keeps all your history intact while tailoring content to the job.
           </p>
 
           <label style={styles.toggleRow}>
@@ -191,15 +194,28 @@ const styles = {
     maxWidth: '520px',
     animation: 'fadeIn 0.4s ease',
   },
+  topRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '20px',
+  },
   backBtn: {
     background: 'none',
     border: 'none',
     fontSize: '14px',
     color: '#6b7280',
     cursor: 'pointer',
-    padding: '0 0 20px 0',
+    padding: '0',
     fontWeight: '500',
   },
+  brand: {
+    fontSize: '20px',
+    fontWeight: '800',
+    color: '#111827',
+    letterSpacing: '-1px',
+  },
+  brandAccent: { color: '#2563eb' },
   header: {
     marginBottom: '28px',
     textAlign: 'center',

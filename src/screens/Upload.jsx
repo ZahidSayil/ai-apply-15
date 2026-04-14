@@ -50,7 +50,7 @@ export default function Upload() {
 
         <div style={styles.header}>
           <h1 style={styles.title}>Land your dream job</h1>
-          <p style={styles.subtitle}>Upload your resume and Give your resume the right vibe</p>
+          <p style={styles.subtitle}>Upload your resume and give it the right vibe for any job</p>
         </div>
 
         {error && (
@@ -89,7 +89,7 @@ export default function Upload() {
         </div>
 
         <div style={styles.features}>
-          {['AI-powered tailoring', 'Match scoring', 'Cover letter generation'].map((f, i) => (
+          {['AI-powered tailoring', 'Skill gap analysis', 'Interview prep'].map((f, i) => (
             <div key={i} style={styles.feature}>
               <span style={styles.featureCheck}>✓</span>
               <span style={styles.featureText}>{f}</span>

@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useState, useRef } from 'react'
+import axios from 'axios'
 
-/** API + older cached runs may store 0.8 for "80%". Always show 0–100 for display. */
 function matchScorePercent(raw) {
   const n = Number(raw)
   if (!Number.isFinite(n)) return 70
@@ -17,6 +17,9 @@ export default function Results() {
   const [activeTab, setActiveTab] = useState('resume')
   const [copied, setCopied] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [interviewQs, setInterviewQs] = useState(null)
+  const [interviewLoading, setInterviewLoading] = useState(false)
+  const [interviewError, setInterviewError] = useState('')
 
   const raw = localStorage.getItem('results')
   if (!raw) {
@@ -76,15 +79,41 @@ export default function Results() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const hasExpertNotes = Boolean(data.expertAgentNotes && data.expertAgentNotes.trim())
+  async function generateInterviewPrep() {
+    setInterviewLoading(true)
+    setInterviewError('')
+    try {
+      const resumeText = localStorage.getItem('resumeText') || ''
+      const jobText = localStorage.getItem('jobText') || ''
+      const res = await axios.post(
+        '/api/interview-prep',
+        { resumeText, jobText },
+        { timeout: 60000 }
+      )
+      setInterviewQs(res.data.questions || [])
+      setActiveTab('interview')
+    } catch (err) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to generate'
+      setInterviewError(msg)
+    }
+    setInterviewLoading(false)
+  }
+
+  function copyInterviewQs() {
+    if (!interviewQs) return
+    const text = interviewQs.map((q, i) =>
+      `${i + 1}. ${q.question}\n   Why: ${q.why}\n   Answer hints:\n${(q.answerHint || '').split?.('\n')?.map(h => `   - ${h}`)?.join('\n') || `   - ${q.answerHint}`}`
+    ).join('\n\n')
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   const tabs = [
-    { id: 'resume', label: '📄 Resume', count: null },
-    { id: 'cover', label: '✉️ Cover Letter', count: null, hidden: !hasCoverLetter },
-    { id: 'ats', label: '🎯 ATS Gaps', count: data.keywordGaps?.missingKeywords?.length || 0 },
-    { id: 'changes', label: '🔄 Changes', count: data.changes?.length },
-    { id: 'tips', label: '💡 Tips', count: data.resumeTips?.length },
-    { id: 'expert', label: '🧠 Expert', count: null, hidden: !hasExpertNotes },
+    { id: 'resume', label: 'Resume' },
+    { id: 'ats', label: 'Skill / Education Gaps', badge: missingKeywords.length || null },
+    { id: 'cover', label: 'Cover Letter', hidden: !hasCoverLetter },
+    { id: 'interview', label: 'Interview Prep', hidden: !interviewQs },
   ].filter(t => !t.hidden)
 
   return (
@@ -92,7 +121,7 @@ export default function Results() {
       <div style={styles.wrapper}>
         {/* Top Bar */}
         <div style={styles.topBar}>
-          <div style={styles.logo}>apply<span style={styles.logoAccent}>ai</span></div>
+          <div style={styles.logo}>CV<span style={styles.logoAccent}>ibe</span></div>
           <button style={styles.newBtn} onClick={() => {
             localStorage.removeItem('jobText')
             localStorage.removeItem('results')
@@ -113,6 +142,20 @@ export default function Results() {
           </div>
         </div>
 
+        {/* Interview Prep CTA */}
+        {!interviewQs && (
+          <button
+            style={{ ...styles.interviewCta, ...(interviewLoading ? { opacity: 0.7 } : {}) }}
+            onClick={generateInterviewPrep}
+            disabled={interviewLoading}
+          >
+            {interviewLoading ? 'Generating interview questions...' : 'Prepare for Interview →'}
+          </button>
+        )}
+        {interviewError && (
+          <p style={styles.interviewError}>{interviewError}</p>
+        )}
+
         {/* Tabs */}
         <div style={styles.tabs}>
           {tabs.map(t => (
@@ -122,7 +165,7 @@ export default function Results() {
               onClick={() => setActiveTab(t.id)}
             >
               {t.label}
-              {t.count != null && <span style={styles.tabBadge}>{t.count}</span>}
+              {t.badge != null && <span style={styles.tabBadge}>{t.badge}</span>}
             </button>
           ))}
         </div>
@@ -131,13 +174,10 @@ export default function Results() {
         {activeTab === 'resume' && (
           <div style={styles.tabContent}>
             <button style={styles.actionBtn} onClick={downloadPDF} disabled={downloading}>
-              {downloading ? '⏳ Generating PDF...' : '⬇ Download as PDF'}
+              {downloading ? 'Generating PDF...' : 'Download as PDF'}
             </button>
 
-            {/* Resume Document — exported to PDF */}
             <div ref={resumeRef} style={styles.resumeDoc}>
-              {/* Header */}
-                           {/* Header */}
               <div style={styles.rHeader}>
                 <div style={styles.rName}>{r.name || 'Your Name'}</div>
                 {r.title && <div style={styles.rHeadline}>{r.title}</div>}
@@ -151,7 +191,6 @@ export default function Results() {
                 </div>
               </div>
 
-              {/* Summary */}
               {r.summary && (
                 <div style={styles.rSection}>
                   <div style={styles.rSectionTitle}>Professional Summary</div>
@@ -160,7 +199,6 @@ export default function Results() {
                 </div>
               )}
 
-              {/* Experience */}
               {r.experience?.length > 0 && (
                 <div style={styles.rSection}>
                   <div style={styles.rSectionTitle}>Experience</div>
@@ -186,7 +224,6 @@ export default function Results() {
                 </div>
               )}
 
-              {/* Education — always show so gaps are visible */}
               <div style={styles.rSection}>
                 <div style={styles.rSectionTitle}>Education</div>
                 <div style={styles.rDivider} />
@@ -207,7 +244,6 @@ export default function Results() {
                 )}
               </div>
 
-              {/* Certifications — compact list */}
               {certifications.length > 0 && (
                 <div style={styles.rSection}>
                   <div style={styles.rSectionTitle}>Certifications</div>
@@ -222,7 +258,6 @@ export default function Results() {
                 </div>
               )}
 
-              {/* Licenses — compact list */}
               {licenses.length > 0 && (
                 <div style={styles.rSection}>
                   <div style={styles.rSectionTitle}>Licenses</div>
@@ -237,7 +272,6 @@ export default function Results() {
                 </div>
               )}
 
-              {/* Trainings — compact list */}
               {trainings.length > 0 && (
                 <div style={styles.rSection}>
                   <div style={styles.rSectionTitle}>Trainings & workshops</div>
@@ -252,7 +286,6 @@ export default function Results() {
                 </div>
               )}
 
-              {/* Skills */}
               {r.skills?.length > 0 && (
                 <div style={styles.rSection}>
                   <div style={styles.rSectionTitle}>Skills</div>
@@ -265,22 +298,18 @@ export default function Results() {
                 </div>
               )}
 
-              {/* Languages */}
-              <div style={styles.rSection}>
-                <div style={styles.rSectionTitle}>Languages</div>
-                <div style={styles.rDivider} />
-                {languages.length === 0 ? (
-                  <p style={styles.sectionEmpty}>No languages found in the source resume.</p>
-                ) : (
+              {languages.length > 0 && (
+                <div style={styles.rSection}>
+                  <div style={styles.rSectionTitle}>Languages</div>
+                  <div style={styles.rDivider} />
                   <div style={styles.rSkills}>
                     {languages.map((lang, i) => (
                       <span key={i} style={styles.rSkill}>{lang}</span>
                     ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              {/* Computer / tools */}
               {r.computerSkills?.length > 0 && (
                 <div style={styles.rSection}>
                   <div style={styles.rSectionTitle}>Computer & tools</div>
@@ -296,127 +325,101 @@ export default function Results() {
           </div>
         )}
 
-        {/* ─── Cover Letter Tab ─── */}
-        {activeTab === 'cover' && (
-          <div style={styles.tabContent}>
-            <button style={styles.actionBtn} onClick={copyLetter}>
-              {copied ? '✅ Copied to clipboard!' : '📋 Copy Cover Letter'}
-            </button>
-            {data.outreachMessage && (
-              <div style={{ ...styles.letterDoc, marginBottom: '12px' }}>
-                <p style={styles.tabIntro}>Short outreach version:</p>
-                <p style={styles.letterText}>{data.outreachMessage}</p>
-              </div>
-            )}
-            <div style={styles.letterDoc}>
-              <p style={styles.letterText}>{data.coverLetter}</p>
-            </div>
-          </div>
-        )}
-
-        {/* ─── ATS Gap Tab ─── */}
+        {/* ─── ATS Insights Tab ─── */}
         {activeTab === 'ats' && (
           <div style={styles.tabContent}>
             {!hasAtsContent ? (
               <div style={styles.atsEmptyBox}>
-                <p style={styles.tabIntro}>No keyword analysis was returned (empty keywordGaps).</p>
-                <p style={styles.sectionEmpty}>Try: paste the <strong>full</strong> job description (not URL-only if scraping fails), enable <strong>Detailed</strong> on the job step, then run analysis again.</p>
+                <p style={styles.sectionEmpty}>No keyword analysis returned. Try pasting the full job description and re-running.</p>
               </div>
             ) : (
               <>
-                {missingKeywords.length > 0 ? (
-                  <p style={styles.tabIntro}>Focus these missing keywords in your resume:</p>
-                ) : (
-                  <p style={styles.tabIntro}>
-                    Great alignment. No major missing keywords stood out compared to this job description.
-                  </p>
-                )}
-                {missingKeywords.map((k, i) => (
-                  <div key={i} style={styles.listItem}>
-                    <span style={styles.listIcon}>!</span>
-                    <span style={styles.listText}>{k}</span>
-                  </div>
-                ))}
-
                 {matchedKeywords.length > 0 && (
-                  <>
-                    <p style={{ ...styles.tabIntro, marginTop: missingKeywords.length > 0 ? '14px' : '0' }}>
-                      Keywords already reflected in your tailored resume:
-                    </p>
-                    {matchedKeywords.map((k, i) => (
-                      <div key={`m-${i}`} style={styles.listItem}>
-                        <span style={{ ...styles.listIcon, color: '#059669' }}>✓</span>
-                        <span style={styles.listText}>{k}</span>
-                      </div>
-                    ))}
-                  </>
+                  <div style={styles.atsSection}>
+                    <p style={styles.atsSectionTitle}>Skills you already have</p>
+                    <div style={styles.atsChips}>
+                      {matchedKeywords.map((k, i) => (
+                        <span key={i} style={styles.atsChipGreen}>{k}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {missingKeywords.length > 0 && (
+                  <div style={styles.atsSection}>
+                    <p style={styles.atsSectionTitle}>Skills to add or highlight</p>
+                    <div style={styles.atsChips}>
+                      {missingKeywords.map((k, i) => (
+                        <span key={i} style={styles.atsChipRed}>{k}</span>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {priorityActions.length > 0 && (
-                  <>
-                    <p style={{ ...styles.tabIntro, marginTop: '14px' }}>Priority actions:</p>
+                  <div style={styles.atsSection}>
+                    <p style={styles.atsSectionTitle}>What to do next</p>
                     {priorityActions.map((a, i) => (
                       <div key={i} style={styles.listItem}>
                         <span style={styles.listIcon}>{i + 1}.</span>
                         <span style={styles.listText}>{a}</span>
                       </div>
                     ))}
-                  </>
+                  </div>
                 )}
               </>
             )}
           </div>
         )}
 
-        {/* ─── Changes Tab ─── */}
-        {activeTab === 'changes' && (
+        {/* ─── Cover Letter Tab ─── */}
+        {activeTab === 'cover' && (
           <div style={styles.tabContent}>
-            <p style={styles.tabIntro}>Here's what we changed to match the job description:</p>
-            {data.changes?.map((c, i) => (
-              <div key={i} style={styles.listItem}>
-                <span style={styles.listIcon}>→</span>
-                <span style={styles.listText}>{c}</span>
-              </div>
-            ))}
-            {(!data.changes || data.changes.length === 0) && (
-              <p style={styles.emptyText}>No specific changes recorded.</p>
-            )}
-          </div>
-        )}
-
-        {/* ─── Tips Tab ─── */}
-        {activeTab === 'tips' && (
-          <div style={styles.tabContent}>
-            <p style={styles.tabIntro}>Tips to make your resume even stronger:</p>
-            {data.resumeTips?.map((t, i) => (
-              <div key={i} style={styles.listItem}>
-                <span style={{ ...styles.listIcon, color: '#d97706' }}>{i + 1}.</span>
-                <span style={styles.listText}>{t}</span>
-              </div>
-            ))}
-            {(!data.resumeTips || data.resumeTips.length === 0) && (
-              <p style={styles.emptyText}>No additional tips.</p>
-            )}
-          </div>
-        )}
-
-        {/* ─── Expert agent notes ─── */}
-        {activeTab === 'expert' && hasExpertNotes && (
-          <div style={styles.tabContent}>
-            <p style={styles.tabIntro}>How the expert agent tailored your resume (transparency):</p>
-            <div style={styles.expertBox}>
-              <p style={styles.expertText}>{data.expertAgentNotes}</p>
+            <button style={styles.actionBtn} onClick={copyLetter}>
+              {copied ? 'Copied!' : 'Copy Cover Letter'}
+            </button>
+            <div style={styles.letterDoc}>
+              <p style={styles.letterText}>{data.coverLetter}</p>
             </div>
           </div>
         )}
 
-        {/* Footer actions */}
+        {/* ─── Interview Prep Tab ─── */}
+        {activeTab === 'interview' && interviewQs && (
+          <div style={styles.tabContent}>
+            <button style={styles.actionBtn} onClick={copyInterviewQs}>
+              {copied ? 'Copied!' : 'Copy All Questions'}
+            </button>
+            <p style={styles.tabIntro}>
+              {interviewQs.length} likely questions based on this job + your resume
+            </p>
+            {interviewQs.map((q, i) => (
+              <div key={i} style={styles.iqCard}>
+                <div style={styles.iqHeader}>
+                  <span style={styles.iqNumber}>Q{i + 1}</span>
+                  <span style={styles.iqQuestion}>{q.question}</span>
+                </div>
+                <div style={styles.iqWhy}>{q.why}</div>
+                <div style={styles.iqHintLabel}>Your talking points:</div>
+                <div style={styles.iqHint}>
+                  {typeof q.answerHint === 'string'
+                    ? q.answerHint
+                    : Array.isArray(q.answerHint)
+                      ? q.answerHint.join('\n')
+                      : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Footer */}
         <div style={styles.footer}>
           <button style={styles.startOverBtn} onClick={() => { localStorage.clear(); navigate('/') }}>
             Start over with new resume
           </button>
           {data._model && (
-            <p style={styles.modelTag}>Expert resume agent · {data._model}</p>
+            <p style={styles.modelTag}>{data._model}</p>
           )}
         </div>
       </div>
@@ -424,7 +427,6 @@ export default function Results() {
   )
 }
 
-/* ── Styles ── */
 const styles = {
   page: {
     minHeight: '100vh',
@@ -435,12 +437,10 @@ const styles = {
   },
   wrapper: {
     width: '100%',
-    maxWidth: '600px',
+    maxWidth: '620px',
     paddingBottom: '40px',
     animation: 'fadeIn 0.4s ease',
   },
-
-  // Top bar
   topBar: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -466,14 +466,13 @@ const styles = {
     cursor: 'pointer',
   },
 
-  // Score card
   scoreCard: {
     borderRadius: '16px',
     padding: '20px 24px',
     display: 'flex',
     gap: '20px',
     alignItems: 'center',
-    marginBottom: '20px',
+    marginBottom: '12px',
     border: '1px solid #e5e7eb',
   },
   scoreLeft: { textAlign: 'center', minWidth: '80px' },
@@ -482,7 +481,27 @@ const styles = {
   scoreRight: { flex: 1 },
   scoreReason: { fontSize: '14px', color: '#374151', lineHeight: 1.6, margin: 0 },
 
-  // Tabs
+  interviewCta: {
+    width: '100%',
+    padding: '14px',
+    borderRadius: '10px',
+    border: '2px solid #7c3aed',
+    background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)',
+    color: '#fff',
+    fontSize: '15px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    marginBottom: '16px',
+    transition: 'all 0.2s ease',
+    letterSpacing: '0.3px',
+  },
+  interviewError: {
+    fontSize: '13px',
+    color: '#dc2626',
+    marginBottom: '12px',
+    textAlign: 'center',
+  },
+
   tabs: {
     display: 'flex',
     gap: '4px',
@@ -494,12 +513,12 @@ const styles = {
   },
   tab: {
     flex: 1,
-    padding: '10px 6px',
+    padding: '10px 8px',
     borderRadius: '8px',
     border: 'none',
     background: 'transparent',
     color: '#6b7280',
-    fontSize: '12px',
+    fontSize: '13px',
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
@@ -507,7 +526,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '4px',
+    gap: '6px',
   },
   tabActive: {
     background: '#ffffff',
@@ -515,25 +534,17 @@ const styles = {
     boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
   },
   tabBadge: {
-    background: '#e5e7eb',
-    color: '#6b7280',
+    background: '#fecaca',
+    color: '#dc2626',
     fontSize: '10px',
     padding: '2px 6px',
     borderRadius: '10px',
     fontWeight: '700',
   },
 
-  // Tab content
-  tabContent: {
-    animation: 'fadeIn 0.3s ease',
-  },
-  tabIntro: {
-    fontSize: '14px',
-    color: '#6b7280',
-    marginBottom: '16px',
-  },
+  tabContent: { animation: 'fadeIn 0.3s ease' },
+  tabIntro: { fontSize: '14px', color: '#6b7280', marginBottom: '16px' },
 
-  // Action buttons
   actionBtn: {
     width: '100%',
     padding: '14px',
@@ -548,7 +559,6 @@ const styles = {
     transition: 'all 0.2s ease',
   },
 
-  // Resume document (white, clean — for PDF export)
   resumeDoc: {
     background: '#ffffff',
     borderRadius: '12px',
@@ -556,74 +566,23 @@ const styles = {
     border: '1px solid #e5e7eb',
     boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
   },
-   rHeader: {
+  rHeader: {
     borderBottom: '2px solid #2563eb',
     paddingBottom: '16px',
     marginBottom: '20px',
     textAlign: 'center',
   },
-  rName: {
-    fontSize: '28px',
-    fontWeight: '800',
-    color: '#111827',
-    letterSpacing: '-0.5px',
-    marginBottom: '4px',
-  },
-  rHeadline: {
-    fontSize: '13px',
-    color: '#4b5563',
-    fontWeight: '500',
-    marginBottom: '10px',
-    letterSpacing: '0.3px',
-  },
-  rContacts: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '4px',
-    justifyContent: 'center',
-  },
-  rContact: {
-    fontSize: '12px',
-    color: '#6b7280',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  rContactDot: {
-    color: '#d1d5db',
-    fontSize: '10px',
-  },
-  rSection: {
-    marginBottom: '18px',
-  },
-  rSectionTitle: {
-    fontSize: '11px',
-    fontWeight: '700',
-    color: '#2563eb',
-    textTransform: 'uppercase',
-    letterSpacing: '1.5px',
-    marginBottom: '4px',
-  },
-  rDivider: {
-    height: '1px',
-    background: '#e5e7eb',
-    marginBottom: '12px',
-  },
-  rText: {
-    fontSize: '13px',
-    color: '#374151',
-    lineHeight: 1.7,
-    margin: 0,
-  },
-  rBlock: {
-    marginBottom: '14px',
-  },
-  rBlockHead: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '6px',
-  },
+  rName: { fontSize: '28px', fontWeight: '800', color: '#111827', letterSpacing: '-0.5px', marginBottom: '4px' },
+  rHeadline: { fontSize: '13px', color: '#4b5563', fontWeight: '500', marginBottom: '10px', letterSpacing: '0.3px' },
+  rContacts: { display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'center' },
+  rContact: { fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '4px' },
+  rContactDot: { color: '#d1d5db', fontSize: '10px' },
+  rSection: { marginBottom: '18px' },
+  rSectionTitle: { fontSize: '11px', fontWeight: '700', color: '#2563eb', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '4px' },
+  rDivider: { height: '1px', background: '#e5e7eb', marginBottom: '12px' },
+  rText: { fontSize: '13px', color: '#374151', lineHeight: 1.7, margin: 0 },
+  rBlock: { marginBottom: '14px' },
+  rBlockHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' },
   rRole: { fontSize: '14px', fontWeight: '700', color: '#111827' },
   rCompany: { fontSize: '13px', color: '#6b7280' },
   rDuration: { fontSize: '12px', color: '#9ca3af', whiteSpace: 'nowrap', marginLeft: '12px' },
@@ -632,103 +591,46 @@ const styles = {
   rCompactList: { paddingLeft: '16px', margin: 0, listStyle: 'disc' },
   rCompactItem: { fontSize: '12px', color: '#374151', lineHeight: 1.7, marginBottom: '2px' },
   rSkills: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
-  rSkill: {
-    padding: '5px 14px',
-    borderRadius: '20px',
-    background: '#eff6ff',
-    color: '#2563eb',
-    fontSize: '12px',
-    fontWeight: '500',
-  },
+  rSkill: { padding: '5px 14px', borderRadius: '20px', background: '#eff6ff', color: '#2563eb', fontSize: '12px', fontWeight: '500' },
+  sectionEmpty: { fontSize: '13px', color: '#6b7280', lineHeight: 1.6, margin: '0 0 4px 0' },
 
-  // Cover letter
-  letterDoc: {
+  atsSection: { marginBottom: '20px' },
+  atsSectionTitle: { fontSize: '13px', fontWeight: '700', color: '#374151', marginBottom: '10px', margin: '0 0 10px 0' },
+  atsChips: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
+  atsChipGreen: { padding: '5px 12px', borderRadius: '20px', background: '#f0fdf4', color: '#059669', fontSize: '12px', fontWeight: '600', border: '1px solid #bbf7d0' },
+  atsChipRed: { padding: '5px 12px', borderRadius: '20px', background: '#fef2f2', color: '#dc2626', fontSize: '12px', fontWeight: '600', border: '1px solid #fecaca' },
+  atsEmptyBox: { background: '#fefce8', border: '1px solid #fde047', borderRadius: '12px', padding: '16px' },
+
+  letterDoc: { background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '24px' },
+  letterText: { fontSize: '14px', color: '#374151', lineHeight: 1.8, whiteSpace: 'pre-wrap', margin: 0 },
+
+  listItem: { display: 'flex', gap: '12px', alignItems: 'flex-start', background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '14px 16px', marginBottom: '8px' },
+  listIcon: { color: '#2563eb', fontWeight: '700', flexShrink: 0, fontSize: '14px' },
+  listText: { fontSize: '14px', color: '#374151', lineHeight: 1.6 },
+
+  iqCard: {
     background: '#ffffff',
     border: '1px solid #e5e7eb',
     borderRadius: '12px',
-    padding: '24px',
+    padding: '18px',
+    marginBottom: '12px',
   },
-  letterText: {
-    fontSize: '14px',
-    color: '#374151',
-    lineHeight: 1.8,
-    whiteSpace: 'pre-wrap',
-    margin: 0,
-  },
-
-  // List items (changes / tips)
-  listItem: {
-    display: 'flex',
-    gap: '12px',
-    alignItems: 'flex-start',
-    background: '#ffffff',
-    border: '1px solid #e5e7eb',
-    borderRadius: '10px',
-    padding: '14px 16px',
-    marginBottom: '8px',
-  },
-  listIcon: {
-    color: '#2563eb',
-    fontWeight: '700',
-    flexShrink: 0,
-    fontSize: '14px',
-  },
-  listText: {
-    fontSize: '14px',
-    color: '#374151',
-    lineHeight: 1.6,
-  },
-  sectionEmpty: {
-    fontSize: '13px',
-    color: '#6b7280',
-    lineHeight: 1.6,
-    margin: '0 0 4px 0',
-  },
-  atsEmptyBox: {
-    background: '#fefce8',
-    border: '1px solid #fde047',
-    borderRadius: '12px',
-    padding: '16px',
-  },
-  emptyText: {
-    fontSize: '14px',
-    color: '#9ca3af',
-    textAlign: 'center',
-    padding: '24px',
-  },
-
-  // Footer
-  footer: {
-    marginTop: '24px',
-    textAlign: 'center',
-  },
-  startOverBtn: {
-    width: '100%',
-    padding: '13px',
-    borderRadius: '10px',
-    border: '1px solid #e5e7eb',
-    background: 'transparent',
-    color: '#6b7280',
-    fontSize: '13px',
-    fontWeight: '500',
-    cursor: 'pointer',
-  },
-  modelTag: {
+  iqHeader: { display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '10px' },
+  iqNumber: {
+    background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+    color: '#fff',
     fontSize: '11px',
-    color: '#d1d5db',
-    marginTop: '12px',
+    fontWeight: '800',
+    padding: '4px 10px',
+    borderRadius: '16px',
+    flexShrink: 0,
   },
-  expertBox: {
-    background: '#ffffff',
-    border: '1px solid #e5e7eb',
-    borderRadius: '12px',
-    padding: '16px',
-  },
-  expertText: {
-    fontSize: '13px',
-    color: '#374151',
-    lineHeight: 1.7,
-    margin: 0,
-    whiteSpace: 'pre-wrap',
-  },
+  iqQuestion: { fontSize: '15px', fontWeight: '700', color: '#111827', lineHeight: 1.5 },
+  iqWhy: { fontSize: '13px', color: '#6b7280', lineHeight: 1.5, marginBottom: '12px', fontStyle: 'italic' },
+  iqHintLabel: { fontSize: '12px', fontWeight: '700', color: '#4f46e5', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  iqHint: { fontSize: '13px', color: '#374151', lineHeight: 1.7, whiteSpace: 'pre-wrap', background: '#f8fafc', borderRadius: '8px', padding: '12px', border: '1px solid #e5e7eb' },
+
+  footer: { marginTop: '24px', textAlign: 'center' },
+  startOverBtn: { width: '100%', padding: '13px', borderRadius: '10px', border: '1px solid #e5e7eb', background: 'transparent', color: '#6b7280', fontSize: '13px', fontWeight: '500', cursor: 'pointer' },
+  modelTag: { fontSize: '11px', color: '#d1d5db', marginTop: '12px' },
 }

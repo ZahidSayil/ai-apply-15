@@ -8,6 +8,7 @@ import pdfParse from 'pdf-parse'
 import axios from 'axios'
 
 import analyzeHandler from '../api/analyze.js'
+import interviewPrepHandler from '../api/interview-prep.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -132,6 +133,10 @@ app.post('/scrape', async (req, res) => {
 // ═══════════════════════════════════════════════════
 app.post('/analyze', (req, res) => {
   return analyzeHandler(req, res)
+})
+
+app.post('/interview-prep', (req, res) => {
+  return interviewPrepHandler(req, res)
 })
 
 // ═══════════════════════════════════════════════════

@@ -77,6 +77,7 @@ export default function Loading() {
   return (
     <div style={styles.page}>
       <div style={styles.container}>
+        <div style={styles.brand}>CV<span style={styles.brandAccent}>ibe</span></div>
         <div style={styles.spinner} />
         <h1 style={styles.title}>Tailoring your resume...</h1>
         <p style={styles.subtitle}>This usually takes 15–30 seconds</p>
@@ -127,6 +128,14 @@ const styles = {
     textAlign: 'center',
     animation: 'fadeIn 0.5s ease',
   },
+  brand: {
+    fontSize: '22px',
+    fontWeight: '800',
+    color: '#111827',
+    letterSpacing: '-1px',
+    marginBottom: '32px',
+  },
+  brandAccent: { color: '#2563eb' },
   spinner: {
     width: '48px',
     height: '48px',
