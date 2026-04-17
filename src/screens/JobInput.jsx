@@ -66,9 +66,12 @@ export default function JobInput() {
         </div>
 
         <div style={styles.header}>
-          <h1 style={styles.title}>Enter job details</h1>
+          <div style={styles.step}>Step 2 of 3</div>
+          <h1 style={styles.title}>Now add the job you want</h1>
           <p style={styles.subtitle}>
-            Using <strong>{resumeName}</strong> — paste the job URL or description
+            Paste the job posting URL or description below. We'll compare it with{' '}
+            <strong>{resumeName}</strong> and rewrite your resume to match what the
+            employer is looking for.
           </p>
         </div>
 
@@ -115,7 +118,8 @@ export default function JobInput() {
               {loading ? '⏳ Fetching job details...' : 'Analyze & Tailor →'}
             </button>
             <p style={styles.hint}>
-              Works best with LinkedIn, Lever, Greenhouse, Workday, and Indeed
+              Works with LinkedIn, Indeed, Lever, Greenhouse, Workday, and most job boards.
+              We'll automatically extract the job description for you.
             </p>
           </div>
         )}
@@ -216,6 +220,18 @@ const styles = {
     letterSpacing: '-1px',
   },
   brandAccent: { color: '#2563eb' },
+  step: {
+    display: 'inline-block',
+    fontSize: '12px',
+    fontWeight: '700',
+    color: '#2563eb',
+    background: '#eff6ff',
+    padding: '4px 12px',
+    borderRadius: '20px',
+    marginBottom: '14px',
+    letterSpacing: '0.5px',
+    textTransform: 'uppercase',
+  },
   header: {
     marginBottom: '28px',
     textAlign: 'center',

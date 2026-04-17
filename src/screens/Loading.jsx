@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 
 const STEPS = [
-  { label: 'Reading your resume', duration: 2000 },
-  { label: 'Analyzing job requirements', duration: 3000 },
-  { label: 'Matching skills & experience', duration: 4000 },
-  { label: 'Tailoring your resume', duration: 5000 },
-  { label: 'Generating final output', duration: 6000 },
+  { label: 'Reading your resume and extracting key details', duration: 2000 },
+  { label: 'Analyzing what the employer is looking for', duration: 3000 },
+  { label: 'Matching your skills against job requirements', duration: 4000 },
+  { label: 'Rewriting bullet points to highlight relevant experience', duration: 5000 },
+  { label: 'Building your tailored resume and gap analysis', duration: 6000 },
 ]
 
 export default function Loading() {
@@ -78,9 +78,10 @@ export default function Loading() {
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.brand}>CV<span style={styles.brandAccent}>ibe</span></div>
+        <div style={styles.step}>Step 3 of 3</div>
         <div style={styles.spinner} />
         <h1 style={styles.title}>Tailoring your resume...</h1>
-        <p style={styles.subtitle}>This usually takes 15–30 seconds</p>
+        <p style={styles.subtitle}>Our AI is rewriting your resume to match this job. This usually takes 15–30 seconds.</p>
 
         <div style={styles.stepsList}>
           {STEPS.map((step, i) => {
@@ -136,6 +137,18 @@ const styles = {
     marginBottom: '32px',
   },
   brandAccent: { color: '#2563eb' },
+  step: {
+    display: 'inline-block',
+    fontSize: '12px',
+    fontWeight: '700',
+    color: '#2563eb',
+    background: '#eff6ff',
+    padding: '4px 12px',
+    borderRadius: '20px',
+    marginBottom: '20px',
+    letterSpacing: '0.5px',
+    textTransform: 'uppercase',
+  },
   spinner: {
     width: '48px',
     height: '48px',
